@@ -3,7 +3,7 @@
 A granular "chaos" sampler instrument (VST3 / AU / Standalone). Load a sample and it chops,
 scatters, re-pitches, reverses and re-orders it into pads, glitches, stutters and chops.
 
-![ChaosGrain](docs/screenshot.png)
+![ChaosGrain instrument (left) and ChaosGrain FX (right)](docs/screenshot.png)
 
 Everything lives on one compact pixel-art "grain unit":
 
