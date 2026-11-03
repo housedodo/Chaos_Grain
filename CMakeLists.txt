@@ -5,6 +5,10 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_OSX_DEPLOYMENT_TARGET "10.13" CACHE STRING "")
 
+# Windows: link the C++ runtime statically so the plugin loads on PCs without the
+# Visual C++ Redistributable installed (otherwise hosts silently skip it).
+set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+
 # JUCE is downloaded automatically. To use a local copy instead:
 #   cmake -B build -DFETCHCONTENT_SOURCE_DIR_JUCE=/path/to/JUCE
 include(FetchContent)
