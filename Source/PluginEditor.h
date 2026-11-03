@@ -66,6 +66,7 @@ public:
     ~FullPanel() override;
 
     std::function<void()> onBack;
+    static constexpr int panelW = 930, panelH = 850;
 
     void paint (juce::Graphics&) override;
     void paintOverChildren (juce::Graphics&) override;
@@ -105,8 +106,8 @@ private:
 
     std::vector<std::unique_ptr<Knob>> knobs;
     std::vector<std::unique_ptr<Choice>> choices;
-    std::vector<juce::Component*> rows[3];
-    juce::Rectangle<int> rowPanels[3], titleArea;
+    std::vector<juce::Component*> rows[4];
+    juce::Rectangle<int> rowPanels[4], titleArea;
     juce::Image background;
 
     std::unique_ptr<juce::FileChooser> chooser;

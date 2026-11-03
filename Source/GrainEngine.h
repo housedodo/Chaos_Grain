@@ -41,6 +41,15 @@ struct GrainParams
     float releaseMs = 300.0f;
     float chaos = 1.0f;      // macro: scales every random amount
     bool  hold = false;      // drone without MIDI
+
+    // Colour (both builds)
+    float filterHz = 20000.0f; // low-pass cutoff on the grain output
+    float reso = 0.1f;         // 0..1 filter resonance
+
+    // Live-input (FX build)
+    float repeats = 0.0f;      // 0..0.95 feedback of the filtered output into the buffer
+    float memorySec = 2.0f;    // how far back grains can reach
+    bool  freeze = false;      // stop recording; keep playing the buffer
 };
 
 struct TransportInfo
@@ -58,6 +67,11 @@ public:
     static constexpr int holdVoice = maxVoices; // extra slot used by "Hold"
     static constexpr int maxUiGrains = 64;
 
+    // Turns the engine into a live effect: input is recorded into a ring buffer that
+    // grains read from. Call once, before prepare (allocates).
+    void enableLiveInput();
+    bool isLive() const { return live; }
+
     void prepare (double sampleRate);
     void reset();
     void killAllGrains();
@@ -68,10 +82,16 @@ public:
 
     // Renders into out[startSample, startSample + numSamples). blockOffset is the
     // position of startSample inside the host block (used for tempo sync).
+    // inL/inR: live input for the same range (FX build), nullptr otherwise.
     void render (juce::AudioBuffer<float>& out, int startSample, int numSamples, int blockOffset,
-                 const SampleBuffer* source, const GrainParams& p, const TransportInfo& t);
+                 const SampleBuffer* source, const float* inL, const float* inR,
+                 const GrainParams& p, const TransportInfo& t);
 
     void publishUiState();
+
+    // UI helper (message thread): min/max peaks of the recent live buffer, oldest -> newest,
+    // covering the same span the grain positions are normalised to.
+    void getLivePeaks (std::vector<std::pair<float, float>>& peaks, int columns) const;
 
     // Read by the editor for drawing (relaxed, approximate is fine).
     std::array<std::atomic<float>, maxUiGrains> uiGrainPos {};
@@ -103,7 +123,8 @@ private:
         juce::uint32 age = 0;
     };
 
-    void spawnGrain (const SampleBuffer& src, const GrainParams& p, float gainComp);
+    struct SourceView { const float* l; const float* r; int len; double rate; };
+    void spawnGrain (const SourceView& src, const GrainParams& p, float gainComp);
     int pickVoice();
     void killGrainsForVoice (int v);
     float quantizeSemis (float semis, int mode) const;
@@ -123,4 +144,20 @@ private:
     float currentBase = 0.0f;
     bool syncMode = false;
     int lastSrcLen = 0;
+
+    // Live input
+    bool live = false;
+    juce::AudioBuffer<float> ring;
+    int ringLen = 0;
+    int writeHead = 0;
+    float fbL = 0.0f, fbR = 0.0f;
+    double liveWindow = 1.0;     // samples grains may reach back (excluding safety margin)
+    double liveSpan = 1.0;       // samples shown in the UI
+    double sizeSamples = 0.0;
+    std::atomic<int> uiWriteHead { 0 };
+    std::atomic<double> uiSpan { 1.0 };
+
+    // Resonant low-pass (TPT state-variable filter), per channel
+    float svfG = 0.0f;
+    float ic1[2] {}, ic2[2] {};
 };

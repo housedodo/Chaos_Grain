@@ -233,7 +233,7 @@ namespace
 const UnitView::KnobSpec UnitView::knobSpecs[3] = {
     { "size",  "SIZE",  24.0f, 132.0f, 9.0f,  false },
     { "chaos", "CHAOS", 64.0f, 133.0f, 15.0f, true  },
-    { "pitch", "PITCH", 104.0f, 132.0f, 9.0f, false },
+    { kIsFx ? "mix" : "pitch", kIsFx ? "MIX" : "PITCH", 104.0f, 132.0f, 9.0f, false },
 };
 
 //==============================================================================
@@ -279,7 +279,9 @@ void UnitView::resized()
 
 void UnitView::timerCallback()
 {
-    if (proc.getSampleVersion() != lastSampleVersion)
+    if (kIsFx)
+        proc.engine.getLivePeaks (peaks, scrW - 6);
+    else if (proc.getSampleVersion() != lastSampleVersion)
     {
         lastSampleVersion = proc.getSampleVersion();
         refreshPeaks();
@@ -289,6 +291,7 @@ void UnitView::timerCallback()
 
 void UnitView::refreshPeaks()
 {
+    if (kIsFx) { proc.engine.getLivePeaks (peaks, scrW - 6); return; }
     peaks.clear();
     auto s = proc.getCurrentSample();
     if (s == nullptr) return;
@@ -315,7 +318,7 @@ void UnitView::render (juce::Image& img)
 {
     Canvas c (img);
     const double nowMs = juce::Time::getMillisecondCounterHiRes();
-    const bool hold = proc.apvts.getRawParameterValue ("hold")->load() > 0.5f;
+    const bool hold = proc.apvts.getRawParameterValue (kIsFx ? "freeze" : "hold")->load() > 0.5f;
     const int active = proc.engine.uiActiveGrains.load (std::memory_order_relaxed);
 
     // --- Casing ---
@@ -329,10 +332,10 @@ void UnitView::render (juce::Image& img)
     c.bevel ((float) powerRect.getX() + 2, (float) powerRect.getY() + (hold ? 3 : 2), 8, 4,
              hold ? shade (col::red, 1.25f) : col::red, 0, ! hold);
     drawLed (c, 24, 10, active > 0 && (active > 2 || std::fmod (nowMs, 200.0) < 120.0));
-    c.small ("HOLD", 14, 17, col::label, true);
+    c.small (kIsFx ? "FREEZE" : "HOLD", 14, 17, col::label, true);
 
     c.text ("CHAOS", 96, 6, col::label, true);
-    c.small ("GRAIN UNIT", 96, 14, col::caseDk, true);
+    c.small (kIsFx ? "GRAIN FX" : "GRAIN UNIT", 96, 14, col::caseDk, true);
 
     // --- CRT ---
     c.bevel (crtX, crtY, crtW, crtH, juce::Colour (0xff8b8a82), 4, false, 2);
@@ -367,7 +370,13 @@ void UnitView::render (juce::Image& img)
     }
 
     const int mid = scrY + scrH / 2;
-    const float amp = (float) scrH * 0.40f;
+    float amp = (float) scrH * 0.40f;
+    if (kIsFx && ! peaks.empty())
+    {
+        float pk = 0.05f;
+        for (auto& pr : peaks) pk = std::max (pk, std::max (-pr.first, pr.second));
+        amp /= std::min (1.0f, pk * 1.1f);
+    }
 
     if (peaks.empty())
     {
@@ -428,7 +437,8 @@ void UnitView::render (juce::Image& img)
         const float v = (float) sliders[touched].getValue();
         if (touched == 0) { caption = v >= 1000.0f ? "SIZE S" : "SIZE MS"; readout = v >= 1000.0f ? juce::String (v / 1000.0f, 2) : juce::String (juce::roundToInt (v)); }
         if (touched == 1) { caption = "CHAOS %"; readout = juce::String (juce::roundToInt (v * 100.0f)); }
-        if (touched == 2) { caption = "PITCH ST"; readout = juce::String (v, 1); }
+        if (touched == 2 && ! kIsFx) { caption = "PITCH ST"; readout = juce::String (v, 1); }
+        if (touched == 2 && kIsFx)   { caption = "MIX %"; readout = juce::String (juce::roundToInt (v * 100.0f)); }
     }
     c.small (caption, 33, 92, col::label, true);
     c.bevel (8, 98, 50, 12, col::caseLo, 1, false);
@@ -476,10 +486,10 @@ void UnitView::mouseDown (const juce::MouseEvent& e)
     const auto p = e.getPosition() / scale;
     if (powerRect.expanded (1).contains (p))
     {
-        auto* hold = proc.apvts.getParameter ("hold");
+        auto* hold = proc.apvts.getParameter (kIsFx ? "freeze" : "hold");
         hold->setValueNotifyingHost (hold->getValue() > 0.5f ? 0.0f : 1.0f);
     }
-    else if (juce::Rectangle<int> (crtX, crtY, crtW, crtH).contains (p))
+    else if (! kIsFx && juce::Rectangle<int> (crtX, crtY, crtW, crtH).contains (p))
     {
         loadViaChooser();
     }
@@ -504,14 +514,15 @@ void UnitView::showMenu()
         presets.addItem (names[i], [this, i] { proc.applyPreset (i); });
 
     const bool sync = proc.apvts.getRawParameterValue ("sync")->load() > 0.5f;
-    const bool hold = proc.apvts.getRawParameterValue ("hold")->load() > 0.5f;
+    const char* holdId = kIsFx ? "freeze" : "hold";
+    const bool hold = proc.apvts.getRawParameterValue (holdId)->load() > 0.5f;
 
     juce::PopupMenu m;
-    m.addItem ("Load sample...", [this] { loadViaChooser(); });
+    if (! kIsFx) m.addItem ("Load sample...", [this] { loadViaChooser(); });
     m.addSubMenu ("Presets", presets);
     m.addItem ("Randomize", [this] { proc.randomize(); });
     m.addSeparator();
-    m.addItem ("Hold (drone)", true, hold, [this, hold] { proc.apvts.getParameter ("hold")->setValueNotifyingHost (hold ? 0.0f : 1.0f); });
+    m.addItem (kIsFx ? "Freeze" : "Hold (drone)", true, hold, [this, hold, holdId] { proc.apvts.getParameter (holdId)->setValueNotifyingHost (hold ? 0.0f : 1.0f); });
     m.addItem ("Tempo sync", true, sync, [this, sync] { proc.apvts.getParameter ("sync")->setValueNotifyingHost (sync ? 0.0f : 1.0f); });
     m.addSeparator();
     m.addItem ("Advanced controls...", [this] { if (onShowAdvanced) onShowAdvanced(); });
@@ -521,6 +532,7 @@ void UnitView::showMenu()
 
 bool UnitView::isInterestedInFileDrag (const juce::StringArray& files)
 {
+    if (kIsFx) return false;
     for (auto& f : files)
         if (juce::File (f).hasFileExtension ("wav;aif;aiff;flac;ogg;mp3"))
             return true;

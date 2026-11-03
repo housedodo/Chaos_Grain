@@ -3,11 +3,19 @@
 
 using APVTS = juce::AudioProcessorValueTreeState;
 
+juce::AudioProcessor::BusesProperties ChaosGrainProcessor::makeBuses()
+{
+    auto b = BusesProperties();
+    if (kIsFx) b = b.withInput ("Input", juce::AudioChannelSet::stereo(), true);
+    return b.withOutput ("Output", juce::AudioChannelSet::stereo(), true);
+}
+
 ChaosGrainProcessor::ChaosGrainProcessor()
-    : AudioProcessor (BusesProperties().withOutput ("Output", juce::AudioChannelSet::stereo(), true)),
+    : AudioProcessor (makeBuses()),
       apvts (*this, nullptr, "PARAMS", createLayout())
 {
     formatManager.registerBasicFormats();
+    if (kIsFx) engine.enableLiveInput();
     startTimer (1000);
 }
 
@@ -61,31 +69,67 @@ APVTS::ParameterLayout ChaosGrainProcessor::createLayout()
     layout.add (pct ("pan", "Stereo Spread", 0.5f));
     layout.add (std::make_unique<AudioParameterBool> (ParameterID { "sync", 1 }, "Tempo Sync", false));
     layout.add (std::make_unique<AudioParameterChoice> (ParameterID { "rate", 1 }, "Sync Rate", rateNames(), 3));
-    layout.add (ms ("attack", "Attack", 1.0f, 5000.0f, 10.0f));
-    layout.add (ms ("release", "Release", 5.0f, 10000.0f, 300.0f));
+    if (! kIsFx)
+    {
+        layout.add (ms ("attack", "Attack", 1.0f, 5000.0f, 10.0f));
+        layout.add (ms ("release", "Release", 5.0f, 10000.0f, 300.0f));
+    }
     layout.add (std::make_unique<AudioParameterFloat> (ParameterID { "chaos", 1 }, "Chaos", NormalisableRange<float> (0.0f, 2.0f), 1.0f,
         AudioParameterFloatAttributes().withStringFromValueFunction ([] (float v, int) { return String (roundToInt (v * 100.0f)) + " %"; })));
     layout.add (std::make_unique<AudioParameterFloat> (ParameterID { "gain", 1 }, "Gain", NormalisableRange<float> (-36.0f, 12.0f, 0.1f), -6.0f,
         AudioParameterFloatAttributes().withStringFromValueFunction ([] (float v, int) { return String (v, 1) + " dB"; })));
-    layout.add (std::make_unique<AudioParameterBool> (ParameterID { "hold", 1 }, "Hold", false));
+    if (! kIsFx)
+        layout.add (std::make_unique<AudioParameterBool> (ParameterID { "hold", 1 }, "Hold", false));
+
+    // Colour: filter + reverb (both builds)
+    NormalisableRange<float> cutRange (40.0f, 20000.0f);
+    cutRange.setSkewForCentre (1000.0f);
+    layout.add (std::make_unique<AudioParameterFloat> (ParameterID { "filter", 1 }, "Filter", cutRange, 20000.0f,
+        AudioParameterFloatAttributes().withStringFromValueFunction ([] (float v, int)
+        { return v >= 19900.0f ? String ("OPEN") : v >= 1000.0f ? String (v / 1000.0f, 1) + " kHz" : String (roundToInt (v)) + " Hz"; })));
+    layout.add (pct ("reso", "Resonance", 0.1f));
+    layout.add (pct ("space", "Space", 0.2f));
+
+    // Live input (FX build)
+    if (kIsFx)
+    {
+        layout.add (pct ("mix", "Mix", 0.5f));
+        layout.add (std::make_unique<AudioParameterFloat> (ParameterID { "repeats", 1 }, "Repeats", NormalisableRange<float> (0.0f, 0.95f), 0.3f,
+            AudioParameterFloatAttributes().withStringFromValueFunction ([] (float v, int) { return String (roundToInt (v * 100.0f)) + " %"; })));
+        NormalisableRange<float> memRange (0.1f, 8.0f);
+        memRange.setSkewForCentre (1.5f);
+        layout.add (std::make_unique<AudioParameterFloat> (ParameterID { "memory", 1 }, "Memory", memRange, 2.0f,
+            AudioParameterFloatAttributes().withStringFromValueFunction ([] (float v, int) { return String (v, 2) + " s"; })));
+        layout.add (std::make_unique<AudioParameterBool> (ParameterID { "freeze", 1 }, "Freeze", false));
+    }
 
     return layout;
 }
 
-void ChaosGrainProcessor::prepareToPlay (double sampleRate, int)
+void ChaosGrainProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
 {
     engine.prepare (sampleRate);
+    dryBuffer.setSize (2, juce::jmax (1, samplesPerBlock), false, false, true);
+    reverb.setSampleRate (sampleRate);
+    reverb.reset();
+    lastMix = -1.0f;
 }
 
 bool ChaosGrainProcessor::isBusesLayoutSupported (const BusesLayout& layouts) const
 {
     const auto& out = layouts.getMainOutputChannelSet();
-    return out == juce::AudioChannelSet::stereo() || out == juce::AudioChannelSet::mono();
+    if (out != juce::AudioChannelSet::stereo() && out != juce::AudioChannelSet::mono()) return false;
+    return ! kIsFx || layouts.getMainInputChannelSet() == out;
 }
 
 GrainParams ChaosGrainProcessor::readParams() const
 {
-    auto get = [this] (const char* id) { return apvts.getRawParameterValue (id)->load(); };
+    auto getOr = [this] (const char* id, float fallback)
+    {
+        auto* v = apvts.getRawParameterValue (id);
+        return v != nullptr ? v->load() : fallback;
+    };
+    auto get = [&getOr] (const char* id) { return getOr (id, 0.0f); };
     static const double rateBeats[] = { 4.0, 2.0, 1.0, 0.5, 0.25, 0.125, 1.0 / 3.0, 1.0 / 6.0 };
 
     GrainParams p;
@@ -106,16 +150,32 @@ GrainParams ChaosGrainProcessor::readParams() const
     p.panSpread  = get ("pan");
     p.sync       = get ("sync") > 0.5f;
     p.stepBeats  = rateBeats[juce::jlimit (0, 7, (int) get ("rate"))];
-    p.attackMs   = get ("attack");
-    p.releaseMs  = get ("release");
+    p.attackMs   = getOr ("attack", 10.0f);
+    p.releaseMs  = getOr ("release", 300.0f);
     p.chaos      = get ("chaos");
     p.hold       = get ("hold") > 0.5f;
+    p.filterHz   = getOr ("filter", 20000.0f);
+    p.reso       = get ("reso");
+    p.repeats    = get ("repeats");
+    p.memorySec  = getOr ("memory", 2.0f);
+    p.freeze     = get ("freeze") > 0.5f;
     return p;
 }
 
 void ChaosGrainProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midi)
 {
     juce::ScopedNoDenormals noDenormals;
+    const int numSamples = buffer.getNumSamples();
+    const int numCh = buffer.getNumChannels();
+
+    // Keep the dry input (FX), then render the wet signal into the cleared buffer.
+    if (kIsFx)
+    {
+        if (dryBuffer.getNumSamples() < numSamples)
+            dryBuffer.setSize (2, numSamples, false, false, true);
+        for (int ch = 0; ch < 2; ++ch)
+            dryBuffer.copyFrom (ch, 0, buffer, juce::jmin (ch, numCh - 1), 0, numSamples);
+    }
     buffer.clear();
 
     // Pick up a newly loaded sample without ever blocking the audio thread.
@@ -148,7 +208,9 @@ void ChaosGrainProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::
         const int t = juce::jlimit (0, buffer.getNumSamples(), meta.samplePosition);
         if (t > cursor)
         {
-            engine.render (buffer, cursor, t - cursor, cursor, src, params, transport);
+            engine.render (buffer, cursor, t - cursor, cursor, src,
+                           kIsFx ? dryBuffer.getReadPointer (0, cursor) : nullptr,
+                           kIsFx ? dryBuffer.getReadPointer (1, cursor) : nullptr, params, transport);
             cursor = t;
         }
 
@@ -159,9 +221,42 @@ void ChaosGrainProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::
     }
 
     if (cursor < buffer.getNumSamples())
-        engine.render (buffer, cursor, buffer.getNumSamples() - cursor, cursor, src, params, transport);
+        engine.render (buffer, cursor, buffer.getNumSamples() - cursor, cursor, src,
+                       kIsFx ? dryBuffer.getReadPointer (0, cursor) : nullptr,
+                       kIsFx ? dryBuffer.getReadPointer (1, cursor) : nullptr, params, transport);
 
     engine.publishUiState();
+
+    // Space: reverb on the wet signal
+    const float space = apvts.getRawParameterValue ("space")->load();
+    juce::Reverb::Parameters rp;
+    rp.roomSize = 0.55f + 0.44f * space;
+    rp.damping = 0.35f;
+    rp.width = 1.0f;
+    rp.wetLevel = 0.22f * space;          // juce::Reverb scales wet x3
+    rp.dryLevel = 0.5f * (1.0f - 0.4f * space); // and dry x2
+    reverb.setParameters (rp);
+    if (numCh > 1) reverb.processStereo (buffer.getWritePointer (0), buffer.getWritePointer (1), numSamples);
+    else           reverb.processMono (buffer.getWritePointer (0), numSamples);
+
+    // Dry/wet (FX): equal-power crossfade, smoothed across the block
+    if (kIsFx)
+    {
+        const float mix = apvts.getRawParameterValue ("mix")->load();
+        const float from = lastMix < 0.0f ? mix : lastMix;
+        for (int ch = 0; ch < numCh; ++ch)
+        {
+            auto* w = buffer.getWritePointer (ch);
+            const auto* d = dryBuffer.getReadPointer (juce::jmin (ch, 1));
+            for (int i = 0; i < numSamples; ++i)
+            {
+                const float m = from + (mix - from) * (float) i / (float) numSamples;
+                const float a = m * juce::MathConstants<float>::halfPi;
+                w[i] = d[i] * std::cos (a) + w[i] * std::sin (a);
+            }
+        }
+        lastMix = mix;
+    }
 
     const float gain = juce::Decibels::decibelsToGain (apvts.getRawParameterValue ("gain")->load());
     buffer.applyGainRamp (0, buffer.getNumSamples(), lastGain, gain);
@@ -239,6 +334,10 @@ void ChaosGrainProcessor::randomize()
     setParam ("jumble",    rnd (0.0f, 1.0f));
     setParam ("repeat",    chance (0.5f) ? 0.0f : rnd (0.0f, 0.6f));
     setParam ("pan",       rnd (0.2f, 1.0f));
+    setParam ("space",     rnd (0.0f, 0.7f));
+    setParam ("filter",    chance (0.6f) ? 20000.0f : std::exp (rnd (std::log (800.0f), std::log (9000.0f))));
+    setParam ("reso",      rnd (0.0f, 0.5f));
+    setParam ("repeats",   chance (0.4f) ? 0.0f : rnd (0.1f, 0.7f)); // FX only (ignored if missing)
 }
 
 juce::StringArray ChaosGrainProcessor::getPresetNames()
@@ -275,12 +374,18 @@ void ChaosGrainProcessor::applyPreset (int index)
     setParam ("sync", p.sync ? 1.0f : 0.0f);
     setParam ("rate", (float) p.rate);   setParam ("attack", p.attack);   setParam ("release", p.release);
     setParam ("chaos", 1.0f);
+
+    static const float presetSpace[] = { 0.2f, 0.55f, 0.65f, 0.1f, 0.25f, 0.15f, 0.5f, 0.45f };
+    static const float presetFilter[] = { 20000.0f, 9000.0f, 20000.0f, 20000.0f, 3500.0f, 20000.0f, 7000.0f, 20000.0f };
+    setParam ("space", presetSpace[index]);
+    setParam ("filter", presetFilter[index]);
+    setParam ("reso", index == 4 ? 0.35f : 0.1f);
 }
 
 void ChaosGrainProcessor::getStateInformation (juce::MemoryBlock& destData)
 {
     auto state = apvts.copyState();
-    if (auto s = getCurrentSample())
+    if (auto s = getCurrentSample(); s != nullptr && ! kIsFx)
         state.setProperty ("samplePath", s->path, nullptr);
     if (auto xml = state.createXml())
         copyXmlToBinary (*xml, destData);

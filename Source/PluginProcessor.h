@@ -4,6 +4,10 @@
 #include <juce_audio_formats/juce_audio_formats.h>
 #include "GrainEngine.h"
 
+// Two plugins are built from this code: the instrument (sampler, MIDI) and the
+// effect "ChaosGrain FX" (processes live input). JUCE defines JucePlugin_IsSynth per target.
+inline constexpr bool kIsFx = ! JucePlugin_IsSynth;
+
 class ChaosGrainProcessor : public juce::AudioProcessor,
                             private juce::Timer
 {
@@ -21,10 +25,10 @@ public:
     bool hasEditor() const override { return true; }
 
     const juce::String getName() const override { return JucePlugin_Name; }
-    bool acceptsMidi() const override { return true; }
+    bool acceptsMidi() const override { return JucePlugin_WantsMidiInput; }
     bool producesMidi() const override { return false; }
     bool isMidiEffect() const override { return false; }
-    double getTailLengthSeconds() const override { return 2.0; }
+    double getTailLengthSeconds() const override { return 8.0; }
 
     int getNumPrograms() override { return 1; }
     int getCurrentProgram() override { return 0; }
@@ -52,6 +56,7 @@ public:
     static juce::StringArray quantNames() { return { "Free", "Semis", "Octaves", "5th+Oct" }; }
 
 private:
+    static BusesProperties makeBuses();
     static juce::AudioProcessorValueTreeState::ParameterLayout createLayout();
     void timerCallback() override; // frees old samples on the message thread
     void setParam (const juce::String& id, float value);
@@ -65,6 +70,9 @@ private:
     std::atomic<int> sampleVersion { 0 };
 
     float lastGain = 0.5f;
+    float lastMix = -1.0f;
+    juce::AudioBuffer<float> dryBuffer;
+    juce::Reverb reverb;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (ChaosGrainProcessor)
 };

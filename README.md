@@ -21,6 +21,25 @@ the full panel with every parameter:
 
 ![Advanced panel](docs/advanced.png)
 
+## Two plugins
+
+| | **ChaosGrain** (instrument) | **ChaosGrain FX** (effect) |
+|---|---|---|
+| Goes on | an instrument / MIDI track | any audio track (guitar, synth, vocals, bus) |
+| Sound source | a loaded sample | the live input, recorded continuously (last ~10 s) |
+| Unit knobs | SIZE · CHAOS · PITCH | SIZE · CHAOS · MIX |
+| Red button | HOLD (drone without MIDI) | FREEZE (stop recording, keep playing the buffer) |
+
+FX-only controls (Advanced panel):
+- **Mix**: dry/wet (equal-power).
+- **Repeats**: feedback. The filtered grain output is fed back into the buffer, so
+  sounds smear and build up; a soft limiter in the loop keeps it stable.
+- **Memory**: how far back in time grains reach (0.1 to 8 s). Position 100% = most recent.
+
+Both versions also have:
+- **Filter / Reso**: resonant low-pass on the grains (inside the feedback loop in FX, so repeats get darker).
+- **Space**: reverb.
+
 ## Using it
 
 1. Put it on an instrument/MIDI track in your DAW.
@@ -82,7 +101,9 @@ cmake --build build --config Release
 The plugin ends up in `build/ChaosGrain_artefacts/Release/`.
 
 ### Installing
-- **Windows:** copy `ChaosGrain.vst3` to `C:\Program Files\Common Files\VST3\`
+- **Windows:** copy `ChaosGrain.vst3` and `ChaosGrain FX.vst3` to `C:\Program Files\Common Files\VST3\`.
+  The standalone apps are `ChaosGrain.exe` and `ChaosGrain FX.exe` (the FX one uses your audio
+  interface input: pick it under Options > Audio/MIDI Settings and use headphones to avoid feedback).
 - **macOS:** copy `ChaosGrain.vst3` to `~/Library/Audio/Plug-Ins/VST3/` and `ChaosGrain.component`
   to `~/Library/Audio/Plug-Ins/Components/`. Unsigned builds downloaded from the internet may need
   `xattr -cr ~/Library/Audio/Plug-Ins/VST3/ChaosGrain.vst3` before your DAW will load them.

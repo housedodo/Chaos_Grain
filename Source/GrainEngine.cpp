@@ -38,9 +38,23 @@ namespace
     }
 }
 
+void GrainEngine::enableLiveInput()
+{
+    live = true;
+    // Allocated once and never resized, so the UI can safely read it.
+    ring.setSize (2, 96000 * 10);
+    ring.clear();
+}
+
 void GrainEngine::prepare (double sampleRate)
 {
     sr = sampleRate;
+    if (live)
+    {
+        ringLen = juce::jmin (ring.getNumSamples(), (int) (sr * 10.0));
+        ring.clear();
+        writeHead = 0;
+    }
     reset();
 }
 
@@ -52,6 +66,8 @@ void GrainEngine::reset()
     lastStepIndex = -1;
     scanPhase = 0.0;
     lastStartNorm = -1.0f;
+    fbL = fbR = 0.0f;
+    ic1[0] = ic1[1] = ic2[0] = ic2[1] = 0.0f;
 }
 
 void GrainEngine::killAllGrains()
@@ -135,9 +151,9 @@ float GrainEngine::quantizeSemis (float semis, int mode) const
     }
 }
 
-void GrainEngine::spawnGrain (const SampleBuffer& src, const GrainParams& p, float gainComp)
+void GrainEngine::spawnGrain (const SourceView& src, const GrainParams& p, float gainComp)
 {
-    const int len = src.buffer.getNumSamples();
+    const int len = src.len;
     if (len < 4) return;
 
     const int vIndex = pickVoice();
@@ -151,7 +167,7 @@ void GrainEngine::spawnGrain (const SampleBuffer& src, const GrainParams& p, flo
     const float chaos = p.chaos;
     const auto& voice = voices[(size_t) vIndex];
 
-    // --- Where does the grain start? ---
+    // --- Where does the grain start? (0..1 within the sample, or within the live window) ---
     float startNorm;
     if (lastStartNorm >= 0.0f && rand01() < p.repeat * chaos)
     {
@@ -174,14 +190,30 @@ void GrainEngine::spawnGrain (const SampleBuffer& src, const GrainParams& p, flo
     // --- Pitch ---
     const float randomSemis = quantizeSemis (randBi() * p.pitchRand * chaos, p.pitchQuant);
     const float semis = p.pitch + (float) (voice.note - 60) + randomSemis;
-    const double ratio = std::pow (2.0, semis / 12.0) * (src.sampleRate / sr);
+    const double ratio = std::pow (2.0, semis / 12.0) * (src.rate / sr);
 
-    // --- Length, direction, stereo ---
+    // --- Length, direction ---
     const int lengthOut = juce::jmax (16, (int) (p.sizeMs * 0.001 * sr));
     const bool reversed = rand01() < p.reverse * chaos;
 
-    const double startPos = (double) startNorm * len;
+    double startPos;
+    if (live)
+    {
+        // Read from the recent past. The grain must never overtake the write head:
+        // forwards it travels ratio*len while the head moves len; backwards it starts
+        // ratio*len ahead of its start. Keeping it ratio*len (min len) back covers both.
+        const double back = (double) lengthOut * juce::jmax (1.0, ratio) + 64.0;
+        const double reach = juce::jlimit (1.0, juce::jmax (1.0, (double) len - back - 64.0), liveWindow);
+        startPos = (double) writeHead - back - (1.0 - (double) startNorm) * reach;
+        startPos -= std::floor (startPos / len) * len;
+    }
+    else
+    {
+        startPos = (double) startNorm * len;
+    }
+
     g->pos = reversed ? startPos + ratio * lengthOut : startPos;
+    if (g->pos >= len) g->pos -= len;
     g->increment = reversed ? -ratio : ratio;
     g->length = lengthOut;
     g->age = 0;
@@ -195,23 +227,47 @@ void GrainEngine::spawnGrain (const SampleBuffer& src, const GrainParams& p, flo
     g->active = true;
 }
 
+namespace
+{
+    // Transparent below 0.8, smoothly limits to +/-1 above: keeps feedback stable.
+    inline float softLimit (float x)
+    {
+        const float a = std::abs (x);
+        if (a <= 0.8f) return x;
+        return std::copysign (0.8f + 0.2f * std::tanh ((a - 0.8f) / 0.2f), x);
+    }
+}
+
 void GrainEngine::render (juce::AudioBuffer<float>& out, int startSample, int numSamples, int blockOffset,
-                          const SampleBuffer* source, const GrainParams& p, const TransportInfo& t)
+                          const SampleBuffer* source, const float* inL, const float* inR,
+                          const GrainParams& p, const TransportInfo& t)
 {
     syncMode = p.sync;
 
-    // Hold = an always-on voice at middle C.
+    // Hold = an always-on voice at middle C. A live effect is always "holding".
+    const bool holdOn = p.hold || live;
     auto& hv = voices[(size_t) holdVoice];
-    if (p.hold && ! hv.gate) { hv.active = true; hv.gate = true; hv.note = 60; hv.velocity = 0.8f; }
-    if (! p.hold) hv.gate = false;
+    if (holdOn && ! hv.gate) { hv.active = true; hv.gate = true; hv.note = 60; hv.velocity = live ? 1.0f : 0.8f; }
+    if (! holdOn) hv.gate = false;
 
     const float attackInc = 1.0f / juce::jmax (1.0f, p.attackMs * 0.001f * (float) sr);
     const float releaseCoef = std::exp (-1.0f / juce::jmax (1.0f, p.releaseMs * 0.001f * (float) sr / 4.6f));
 
-    const int srcLen = source != nullptr ? source->buffer.getNumSamples() : 0;
-    const int srcCh = source != nullptr ? source->buffer.getNumChannels() : 0;
-    const float* srcL = srcLen > 0 ? source->buffer.getReadPointer (0) : nullptr;
-    const float* srcR = srcLen > 0 ? source->buffer.getReadPointer (juce::jmin (1, srcCh - 1)) : nullptr;
+    // Where grains read from: the loaded sample, or the live ring buffer.
+    SourceView src { nullptr, nullptr, 0, sr };
+    if (live)
+    {
+        src = { ring.getReadPointer (0), ring.getReadPointer (1), ringLen, sr };
+    }
+    else if (source != nullptr && source->buffer.getNumSamples() > 0)
+    {
+        const int ch = source->buffer.getNumChannels();
+        src = { source->buffer.getReadPointer (0), source->buffer.getReadPointer (juce::jmin (1, ch - 1)),
+                source->buffer.getNumSamples(), source->sampleRate };
+    }
+    const int srcLen = src.len;
+    float* ringL = live ? ring.getWritePointer (0) : nullptr;
+    float* ringR = live ? ring.getWritePointer (1) : nullptr;
 
     // Tempo / timing
     const double bpm = t.bpm > 0.0 ? t.bpm : 120.0;
@@ -223,13 +279,42 @@ void GrainEngine::render (juce::AudioBuffer<float>& out, int startSample, int nu
     const double freeInterval = sr / juce::jmax (0.1, (double) p.density);
 
     lastSrcLen = srcLen;
-    const double scanInc = srcLen > 0 ? (double) p.scan * (source->sampleRate / sr) / srcLen : 0.0;
+    sizeSamples = p.sizeMs * 0.001 * sr;
+    double scanInc = 0.0;
+    if (live)
+    {
+        liveWindow = juce::jmax (1.0, (double) p.memorySec * sr);
+        liveSpan = juce::jmin ((double) juce::jmax (1, ringLen - 1), liveWindow + sizeSamples + 64.0);
+        scanInc = (double) p.scan / liveWindow; // 1x = moves through the window in real time
+    }
+    else if (srcLen > 0)
+    {
+        scanInc = (double) p.scan * (src.rate / sr) / srcLen;
+    }
+
+    // Filter coefficients (smoothed per sample)
+    const float fc = juce::jlimit (20.0f, (float) (sr * 0.45), p.filterHz);
+    const float gTarget = std::tan (juce::MathConstants<float>::pi * fc / (float) sr);
+    if (svfG <= 0.0f) svfG = gTarget;
+    const float k = 1.414f - 1.3f * juce::jlimit (0.0f, 1.0f, p.reso);
+    const bool filterOn = fc < (float) (sr * 0.45) - 1.0f || p.reso > 0.15f;
+    const float fb = juce::jlimit (0.0f, 0.95f, p.repeats);
 
     float* outL = out.getWritePointer (0);
     float* outR = out.getNumChannels() > 1 ? out.getWritePointer (1) : nullptr;
 
     for (int i = 0; i < numSamples; ++i)
     {
+        // Record live input (+ feedback) unless frozen
+        if (live && ! p.freeze && ringLen > 0)
+        {
+            const float xl = inL != nullptr ? inL[i] : 0.0f;
+            const float xr = inR != nullptr ? inR[i] : xl;
+            ringL[writeHead] = softLimit (xl + fb * fbL);
+            ringR[writeHead] = softLimit (xr + fb * fbR);
+            if (++writeHead >= ringLen) writeHead = 0;
+        }
+
         // Voice envelopes
         for (auto& v : voices)
         {
@@ -282,7 +367,7 @@ void GrainEngine::render (juce::AudioBuffer<float>& out, int startSample, int nu
                 lastStepIndex = -1;
             }
 
-            if (trigger) spawnGrain (*source, p, gainComp);
+            if (trigger) spawnGrain (src, p, gainComp);
         }
 
         // Sum grains
@@ -295,8 +380,8 @@ void GrainEngine::render (juce::AudioBuffer<float>& out, int startSample, int nu
 
                 const float env = voices[(size_t) g.voice].env;
                 const float w = window ((float) g.age / (float) g.length, g.fade) * env;
-                const float sL = readHermite (srcL, srcLen, g.pos);
-                const float sR = srcR == srcL ? sL : readHermite (srcR, srcLen, g.pos);
+                const float sL = readHermite (src.l, srcLen, g.pos);
+                const float sR = src.r == src.l ? sL : readHermite (src.r, srcLen, g.pos);
                 l += sL * w * g.gainL;
                 r += sR * w * g.gainR;
 
@@ -308,6 +393,25 @@ void GrainEngine::render (juce::AudioBuffer<float>& out, int startSample, int nu
                     g.active = false;
             }
         }
+
+        // Resonant low-pass (TPT SVF)
+        svfG += (gTarget - svfG) * 0.002f;
+        if (filterOn || std::abs (svfG - gTarget) > 1.0e-4f)
+        {
+            const float a1 = 1.0f / (1.0f + svfG * (svfG + k)), a2 = svfG * a1, a3 = svfG * a2;
+            float* x[2] = { &l, &r };
+            for (int c = 0; c < 2; ++c)
+            {
+                const float v3 = *x[c] - ic2[c];
+                const float v1 = a1 * ic1[c] + a2 * v3;
+                const float v2 = ic2[c] + a2 * ic1[c] + a3 * v3;
+                ic1[c] = 2.0f * v1 - ic1[c];
+                ic2[c] = 2.0f * v2 - ic2[c];
+                *x[c] = v2;
+            }
+        }
+
+        fbL = l; fbR = r;
 
         outL[startSample + i] += l;
         if (outR != nullptr) outR[startSample + i] += r;
@@ -322,12 +426,65 @@ void GrainEngine::publishUiState()
     {
         if (g.active) ++total;
         if (! g.active || n >= maxUiGrains) continue;
-        uiGrainPos[(size_t) n].store (lastSrcLen > 0 ? (float) (g.pos / lastSrcLen) : 0.0f, std::memory_order_relaxed);
+
+        float pos = 0.0f;
+        if (live && ringLen > 0)
+        {
+            double back = (double) writeHead - g.pos;
+            if (back < 0.0) back += ringLen;
+            pos = (float) juce::jlimit (0.0, 1.0, 1.0 - back / liveSpan);
+        }
+        else if (lastSrcLen > 0)
+        {
+            pos = (float) (g.pos / lastSrcLen);
+        }
+
+        uiGrainPos[(size_t) n].store (pos, std::memory_order_relaxed);
         uiGrainLevel[(size_t) n].store (window ((float) g.age / (float) g.length, g.fade)
                                           * voices[(size_t) g.voice].env, std::memory_order_relaxed);
         ++n;
     }
     uiNumGrains.store (n, std::memory_order_relaxed);
     uiActiveGrains.store (total, std::memory_order_relaxed);
-    uiPlayhead.store (currentBase, std::memory_order_relaxed);
+
+    if (live)
+    {
+        const double back = sizeSamples + 64.0 + (1.0 - (double) currentBase) * liveWindow;
+        uiPlayhead.store ((float) juce::jlimit (0.0, 1.0, 1.0 - back / liveSpan), std::memory_order_relaxed);
+        uiWriteHead.store (writeHead, std::memory_order_relaxed);
+        uiSpan.store (liveSpan, std::memory_order_relaxed);
+    }
+    else
+    {
+        uiPlayhead.store (currentBase, std::memory_order_relaxed);
+    }
+}
+
+void GrainEngine::getLivePeaks (std::vector<std::pair<float, float>>& peaks, int columns) const
+{
+    peaks.assign ((size_t) juce::jmax (0, columns), { 0.0f, 0.0f });
+    if (! live || ringLen <= 0 || columns <= 0) return;
+
+    const int head = uiWriteHead.load (std::memory_order_relaxed);
+    const double span = uiSpan.load (std::memory_order_relaxed);
+    const float* l = ring.getReadPointer (0);
+    const float* r = ring.getReadPointer (1);
+    const double perCol = span / columns;
+    const int stride = juce::jmax (1, (int) (perCol / 48.0));
+
+    for (int c = 0; c < columns; ++c)
+    {
+        const double a = (double) head - span + c * perCol;
+        float lo = 0.0f, hi = 0.0f;
+        for (int k = 0; k < (int) perCol; k += stride)
+        {
+            int idx = (int) std::floor (a + k);
+            idx %= ringLen;
+            if (idx < 0) idx += ringLen;
+            const float v = 0.5f * (l[idx] + r[idx]);
+            lo = juce::jmin (lo, v);
+            hi = juce::jmax (hi, v);
+        }
+        peaks[(size_t) c] = { lo, hi };
+    }
 }

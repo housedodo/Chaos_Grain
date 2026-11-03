@@ -14,6 +14,9 @@ FetchContent_Declare(JUCE
     GIT_SHALLOW TRUE)
 FetchContent_MakeAvailable(JUCE)
 
+# Two plugins from the same code:
+#   ChaosGrain     - instrument: load a sample, play it with MIDI
+#   ChaosGrain FX  - effect: mangles live input (freeze, feedback, mix)
 juce_add_plugin(ChaosGrain
     COMPANY_NAME "ChaosGrain"
     PRODUCT_NAME "ChaosGrain"
@@ -29,26 +32,43 @@ juce_add_plugin(ChaosGrain
     VST3_CATEGORIES Instrument Sampler
     AU_MAIN_TYPE kAudioUnitType_MusicDevice)
 
-target_sources(ChaosGrain PRIVATE
-    Source/GrainEngine.cpp
-    Source/PluginProcessor.cpp
-    Source/PluginEditor.cpp
-    Source/UnitView.cpp)
+juce_add_plugin(ChaosGrainFX
+    COMPANY_NAME "ChaosGrain"
+    PRODUCT_NAME "ChaosGrain FX"
+    IS_SYNTH FALSE
+    NEEDS_MIDI_INPUT FALSE
+    NEEDS_MIDI_OUTPUT FALSE
+    IS_MIDI_EFFECT FALSE
+    EDITOR_WANTS_KEYBOARD_FOCUS FALSE
+    COPY_PLUGIN_AFTER_BUILD FALSE
+    PLUGIN_MANUFACTURER_CODE Chgr
+    PLUGIN_CODE Cgf1
+    FORMATS VST3 AU Standalone
+    VST3_CATEGORIES Fx Delay Reverb
+    AU_MAIN_TYPE kAudioUnitType_Effect)
 
-target_compile_definitions(ChaosGrain PUBLIC
-    JUCE_WEB_BROWSER=0
-    JUCE_USE_CURL=0
-    JUCE_VST3_CAN_REPLACE_VST2=0
-    JUCE_DISPLAY_SPLASH_SCREEN=0)
+foreach(target ChaosGrain ChaosGrainFX)
+    target_sources(${target} PRIVATE
+        Source/GrainEngine.cpp
+        Source/PluginProcessor.cpp
+        Source/PluginEditor.cpp
+        Source/UnitView.cpp)
 
-target_link_libraries(ChaosGrain
-    PRIVATE
-        juce::juce_audio_utils
-        juce::juce_audio_formats
-    PUBLIC
-        juce::juce_recommended_config_flags
-        juce::juce_recommended_lto_flags
-        juce::juce_recommended_warning_flags)
+    target_compile_definitions(${target} PUBLIC
+        JUCE_WEB_BROWSER=0
+        JUCE_USE_CURL=0
+        JUCE_VST3_CAN_REPLACE_VST2=0
+        JUCE_DISPLAY_SPLASH_SCREEN=0)
+
+    target_link_libraries(${target}
+        PRIVATE
+            juce::juce_audio_utils
+            juce::juce_audio_formats
+        PUBLIC
+            juce::juce_recommended_config_flags
+            juce::juce_recommended_lto_flags
+            juce::juce_recommended_warning_flags)
+endforeach()
 
 option(CHAOSGRAIN_TESTS "Build the offline render test" OFF)
 if(CHAOSGRAIN_TESTS)
@@ -65,4 +85,11 @@ if(CHAOSGRAIN_TESTS)
     target_include_directories(DemoVideo PRIVATE $<TARGET_PROPERTY:ChaosGrain,INCLUDE_DIRECTORIES>)
     target_compile_definitions(DemoVideo PRIVATE $<TARGET_PROPERTY:ChaosGrain,COMPILE_DEFINITIONS>)
     target_link_libraries(DemoVideo PRIVATE ChaosGrain)
+
+    # Offline test of the FX build: live input, freeze, feedback stability.
+    juce_add_console_app(FxTest)
+    target_sources(FxTest PRIVATE Tests/FxTest.cpp)
+    target_include_directories(FxTest PRIVATE $<TARGET_PROPERTY:ChaosGrainFX,INCLUDE_DIRECTORIES>)
+    target_compile_definitions(FxTest PRIVATE $<TARGET_PROPERTY:ChaosGrainFX,COMPILE_DEFINITIONS>)
+    target_link_libraries(FxTest PRIVATE ChaosGrainFX)
 endif()

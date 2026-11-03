@@ -232,6 +232,16 @@ void GemLogo::paint (juce::Graphics& g)
 //==============================================================================
 void WaveformView::refreshPeaks()
 {
+    if (kIsFx)
+    {
+        proc.engine.getLivePeaks (peaks, juce::jmax (1, getWidth() / px - 4));
+        float pk = 0.05f; // auto-scale so quiet input is still visible
+        for (auto& pr : peaks) pk = std::max (pk, std::max (-pr.first, pr.second));
+        for (auto& pr : peaks) { pr.first /= pk * 1.1f; pr.second /= pk * 1.1f; }
+        const bool frozen = proc.apvts.getRawParameterValue ("freeze")->load() > 0.5f;
+        sampleName = frozen ? "LIVE INPUT - FROZEN" : "LIVE INPUT";
+        return;
+    }
     peaks.clear();
     auto s = proc.getCurrentSample();
     if (s == nullptr || getWidth() <= 0) { sampleName = {}; repaint(); return; }
@@ -377,6 +387,7 @@ void WaveformView::paint (juce::Graphics& g)
 
 bool WaveformView::isInterestedInFileDrag (const juce::StringArray& files)
 {
+    if (kIsFx) return false;
     for (auto& f : files)
         if (juce::File (f).hasFileExtension ("wav;aif;aiff;flac;ogg;mp3"))
             return true;
@@ -407,9 +418,14 @@ FullPanel::FullPanel (ChaosGrainProcessor& p)
     logo.setInterceptsMouseClicks (false, false);
     randomButton.getProperties().set ("hot", true);
 
-    holdAttach = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (p.apvts, "hold", holdButton);
+    holdAttach = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (p.apvts, kIsFx ? "freeze" : "hold", holdButton);
+    if (kIsFx)
+    {
+        holdButton.setButtonText ("FREEZE");
+        loadButton.setVisible (false);
+    }
     syncAttach = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (p.apvts, "sync", syncButton);
-    holdButton.setTooltip ("Drone the sample without MIDI");
+    holdButton.setTooltip (kIsFx ? "Stop recording and keep playing the buffer" : "Drone the sample without MIDI");
     syncButton.setTooltip ("Trigger grains on the host tempo grid");
     loadButton.setTooltip ("Load an audio file (or drag one onto the screen)");
     randomButton.setTooltip ("Roll the dice on every grain setting");
@@ -453,13 +469,26 @@ FullPanel::FullPanel (ChaosGrainProcessor& p)
                 &addKnob ("repeat", "Repeat", "Chance to stutter the previous grain").slider };
 
     rows[2] = { &addKnob ("pan", "Spread", "Random stereo placement").slider,
-                &addChoice ("rate", "Sync Rate", ChaosGrainProcessor::rateNames()).box,
-                &addKnob ("attack", "Attack", "Note fade in").slider,
-                &addKnob ("release", "Release", "Note fade out").slider,
-                &addKnob ("chaos", "CHAOS", "Macro: scales every random amount").slider,
-                &addKnob ("gain", "Gain", "Output level").slider };
+                &addChoice ("rate", "Sync Rate", ChaosGrainProcessor::rateNames()).box };
+    if (! kIsFx)
+    {
+        rows[2].push_back (&addKnob ("attack", "Attack", "Note fade in").slider);
+        rows[2].push_back (&addKnob ("release", "Release", "Note fade out").slider);
+    }
+    rows[2].push_back (&addKnob ("chaos", "CHAOS", "Macro: scales every random amount").slider);
+    rows[2].push_back (&addKnob ("gain", "Gain", "Output level").slider);
 
-    setSize (930, 690);
+    rows[3] = { &addKnob ("filter", "Filter", "Low-pass filter on the grains (inside the feedback loop)").slider,
+                &addKnob ("reso", "Reso", "Filter resonance").slider,
+                &addKnob ("space", "Space", "Reverb amount and size").slider };
+    if (kIsFx)
+    {
+        rows[3].push_back (&addKnob ("repeats", "Repeats", "Feedback: output is fed back into the buffer").slider);
+        rows[3].push_back (&addKnob ("memory", "Memory", "How far back in time grains can reach").slider);
+        rows[3].push_back (&addKnob ("mix", "Mix", "Dry / wet").slider);
+    }
+
+    setSize (panelW, panelH);
     startTimerHz (30);
 }
 
@@ -513,8 +542,8 @@ void FullPanel::paint (juce::Graphics& g)
         blitLowRes (g, background, 0, 0, px);
 
 
-    const char* titles[] = { "GRAIN", "PITCH / ORDER", "MOTION / OUTPUT" };
-    for (int i = 0; i < 3; ++i)
+    const char* titles[] = { "GRAIN", "PITCH / ORDER", "MOTION / OUTPUT", kIsFx ? "COLOUR / FEEDBACK / MIX" : "COLOUR / SPACE" };
+    for (int i = 0; i < 4; ++i)
         pixelText (g, titles[i], rowPanels[i].reduced (px * 3, px * 2).withHeight (18), pal::yellow,
                    juce::Justification::topLeft, 2);
 }
@@ -552,8 +581,8 @@ void FullPanel::resized()
     waveform.setBounds (area.removeFromTop (juce::jmax (120, area.getHeight() / 4)));
     area.removeFromTop (9);
 
-    const int rowH = area.getHeight() / 3;
-    for (int i = 0; i < 3; ++i)
+    const int rowH = area.getHeight() / 4;
+    for (int i = 0; i < 4; ++i)
     {
         rowPanels[i] = area.removeFromTop (rowH).withTrimmedBottom (6);
         auto r = rowPanels[i].reduced (px * 3, px * 2);
@@ -575,7 +604,7 @@ void FullPanel::resized()
 
 void FullPanel::timerCallback()
 {
-    if (proc.getSampleVersion() != lastSampleVersion)
+    if (kIsFx || proc.getSampleVersion() != lastSampleVersion)
     {
         lastSampleVersion = proc.getSampleVersion();
         waveform.refreshPeaks();
@@ -606,7 +635,7 @@ void ChaosGrainEditor::setAdvanced (bool advanced)
     proc.apvts.state.setProperty ("advancedUI", advanced, nullptr);
     unit.setVisible (! advanced);
     full.setVisible (advanced);
-    if (advanced) setSize (930, 690);
+    if (advanced) setSize (FullPanel::panelW, FullPanel::panelH);
     else          setSize (UnitView::lowW * UnitView::scale, UnitView::lowH * UnitView::scale);
 }
 
