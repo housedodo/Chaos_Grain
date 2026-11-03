@@ -93,20 +93,20 @@ void RetroLookAndFeel::drawLabel (juce::Graphics& g, juce::Label& label)
     if (dynamic_cast<juce::Slider*> (label.getParentComponent()) != nullptr)
     {
         // Value readout: inset LCD-ish box.
-        const auto box = area.withSizeKeepingCentre (juce::jmin (area.getWidth(), 78), area.getHeight());
+        const auto box = area.withSizeKeepingCentre (juce::jmin (area.getWidth(), 104), area.getHeight());
         g.setColour (pal::panelLo);
         g.fillRect (box);
         g.setColour (pal::inset);
         g.fillRect (box.reduced (2));
-        pixelText (g, text, box.reduced (2, 1), pal::cyan, juce::Justification::centred, 7.0f, 2, false);
+        pixelText (g, text, box.reduced (2, 1), pal::cyan, juce::Justification::centred, 2, false);
     }
     else if (dynamic_cast<juce::ComboBox*> (label.getParentComponent()) != nullptr)
     {
-        pixelText (g, text, area.reduced (2, 0), pal::text, juce::Justification::centredLeft, 7.0f, 2);
+        pixelText (g, text, area.reduced (2, 0), pal::text, juce::Justification::centredLeft, 2);
     }
     else
     {
-        pixelText (g, text, area, pal::dim, juce::Justification::centredBottom, 7.0f, 2);
+        pixelText (g, text, area, pal::dim, juce::Justification::centredBottom, 2);
     }
 }
 
@@ -127,7 +127,7 @@ void RetroLookAndFeel::drawButtonText (juce::Graphics& g, juce::TextButton& b, b
 {
     auto r = b.getLocalBounds();
     if (down) r.translate (px, px);
-    pixelText (g, b.getButtonText().toUpperCase(), r, pal::text, juce::Justification::centred, 8.0f, 2);
+    pixelText (g, b.getButtonText().toUpperCase(), r, pal::text, juce::Justification::centred, 2);
 }
 
 void RetroLookAndFeel::drawToggleButton (juce::Graphics& g, juce::ToggleButton& b, bool over, bool)
@@ -147,7 +147,7 @@ void RetroLookAndFeel::drawToggleButton (juce::Graphics& g, juce::ToggleButton& 
     const int y = (h - boxSize) / 2 * px;
     blitLowRes (g, img, 0, y, px);
     pixelText (g, b.getButtonText().toUpperCase(), b.getLocalBounds().withTrimmedLeft (boxSize * px + 6),
-               b.getToggleState() ? pal::cyan : pal::text, juce::Justification::centredLeft, 8.0f, 2);
+               b.getToggleState() ? pal::cyan : pal::text, juce::Justification::centredLeft, 2);
 }
 
 void RetroLookAndFeel::drawComboBox (juce::Graphics& g, int w, int h, bool, int, int, int, int, juce::ComboBox& box)
@@ -169,7 +169,7 @@ void RetroLookAndFeel::drawComboBox (juce::Graphics& g, int w, int h, bool, int,
 
 void RetroLookAndFeel::positionComboBoxText (juce::ComboBox& box, juce::Label& label)
 {
-    label.setBounds (6, 1, box.getWidth() - 28, box.getHeight() - 2);
+    label.setBounds (8, 1, box.getWidth() - 30, box.getHeight() - 2);
 }
 
 void RetroLookAndFeel::drawPopupMenuBackground (juce::Graphics& g, int w, int h)
@@ -195,12 +195,12 @@ void RetroLookAndFeel::drawPopupMenuItem (juce::Graphics& g, const juce::Rectang
     }
     const juce::String prefix = isTicked ? "> " : "  ";
     pixelText (g, prefix + text.toUpperCase(), r.reduced (4, 0), isTicked ? pal::yellow : pal::text,
-               juce::Justification::centredLeft, 8.0f, 2);
+               juce::Justification::centredLeft, 2);
 }
 
 juce::Rectangle<int> RetroLookAndFeel::getTooltipBounds (const juce::String& text, juce::Point<int> pos, juce::Rectangle<int> parent)
 {
-    const int w = juce::jmin (420, text.length() * 10 + 24), h = 28;
+    const int w = juce::jmin (420, text.length() * 12 + 24), h = 28;
     return juce::Rectangle<int> (pos.x > parent.getCentreX() ? pos.x - (w + 12) : pos.x + 24,
                                  pos.y > parent.getCentreY() ? pos.y - (h + 6) : pos.y + 6, w, h)
                .constrainedWithin (parent);
@@ -209,7 +209,7 @@ juce::Rectangle<int> RetroLookAndFeel::getTooltipBounds (const juce::String& tex
 void RetroLookAndFeel::drawTooltip (juce::Graphics& g, const juce::String& text, int w, int h)
 {
     drawPopupMenuBackground (g, w, h);
-    pixelText (g, text.toUpperCase(), { 8, 0, w - 12, h }, pal::yellow, juce::Justification::centredLeft, 7.0f, 2);
+    pixelText (g, text.toUpperCase(), { 8, 0, w - 12, h }, pal::yellow, juce::Justification::centredLeft, 2);
 }
 
 //==============================================================================
@@ -359,13 +359,13 @@ void WaveformView::paint (juce::Graphics& g)
     {
         const bool blink = std::fmod (t, 1.2f) < 0.8f;
         if (blink)
-            pixelText (g, "INSERT SAMPLE", getLocalBounds(), pal::yellow, juce::Justification::centred, 9.0f, 3);
+            pixelText (g, "INSERT SAMPLE", getLocalBounds(), pal::yellow, juce::Justification::centred, 4);
         pixelText (g, "DRAG A FILE HERE OR CLICK LOAD", getLocalBounds().withTrimmedTop (getHeight() / 2 + 18).withHeight (24),
-                   pal::dim, juce::Justification::centredTop, 7.0f, 2);
+                   pal::dim, juce::Justification::centredTop, 2);
     }
     else
     {
-        pixelText (g, sampleName.toUpperCase(), textArea.withHeight (20), pal::dim, juce::Justification::topLeft, 7.0f, 2);
+        pixelText (g, sampleName.toUpperCase(), textArea.withHeight (20), pal::dim, juce::Justification::topLeft, 2);
     }
 
     if (dragging)
@@ -427,7 +427,7 @@ ChaosGrainEditor::ChaosGrainEditor (ChaosGrainProcessor& p)
     randomButton.onClick = [this] { proc.randomize(); };
 
     presetBox.addItemList (ChaosGrainProcessor::getPresetNames(), 1);
-    presetBox.setTextWhenNothingSelected ("Presets");
+    presetBox.setText ("PRESETS", juce::dontSendNotification);
     presetBox.onChange = [this]
     {
         if (presetBox.getSelectedItemIndex() >= 0)
@@ -443,7 +443,7 @@ ChaosGrainEditor::ChaosGrainEditor (ChaosGrainProcessor& p)
                 &addKnob ("shape", "Shape", "0 = hard chop, 100 = smooth bell envelope").slider };
 
     rows[1] = { &addKnob ("pitch", "Pitch", "Transpose in semitones").slider,
-                &addKnob ("pitchRand", "Pitch Chaos", "Random pitch per grain (+/- semitones)").slider,
+                &addKnob ("pitchRand", "Pitch Rnd", "Random pitch per grain (+/- semitones)").slider,
                 &addChoice ("pitchQuant", "Quantize", ChaosGrainProcessor::quantNames()).box,
                 &addKnob ("reverse", "Reverse", "Chance a grain plays backwards").slider,
                 &addKnob ("slices", "Slices", "Cut the sample into N chops").slider,
@@ -474,7 +474,7 @@ ChaosGrainEditor::Knob& ChaosGrainEditor::addKnob (const juce::String& id, const
 {
     auto k = std::make_unique<Knob>();
     k->slider.setName (id);
-    k->slider.setTextBoxStyle (juce::Slider::TextBoxBelow, false, 80, 20);
+    k->slider.setTextBoxStyle (juce::Slider::TextBoxBelow, false, 104, 20);
     k->slider.setTooltip (tip);
     k->label.setText (name, juce::dontSendNotification);
     k->label.attachToComponent (&k->slider, false);
@@ -512,12 +512,12 @@ void ChaosGrainEditor::paint (juce::Graphics& g)
     if (background.isValid())
         blitLowRes (g, background, 0, 0, px);
 
-    pixelText (g, "CHAOS GRAIN", titleArea, pal::magenta, juce::Justification::centredLeft, 10.0f, 3);
+    pixelText (g, "CHAOS GRAIN", titleArea, pal::magenta, juce::Justification::centredLeft, 4);
 
     const char* titles[] = { "GRAIN", "PITCH / ORDER", "MOTION / OUTPUT" };
     for (int i = 0; i < 3; ++i)
         pixelText (g, titles[i], rowPanels[i].reduced (px * 3, px * 2).withHeight (18), pal::yellow,
-                   juce::Justification::topLeft, 7.0f, 2);
+                   juce::Justification::topLeft, 2);
 }
 
 void ChaosGrainEditor::paintOverChildren (juce::Graphics& g)
@@ -535,7 +535,7 @@ void ChaosGrainEditor::resized()
     auto top = area.removeFromTop (48);
     logo.setBounds (top.removeFromLeft (48));
     top.removeFromLeft (6);
-    titleArea = top.removeFromLeft (260);
+    titleArea = top.removeFromLeft (270);
 
     auto buttons = top.withSizeKeepingCentre (top.getWidth(), 36);
     randomButton.setBounds (buttons.removeFromRight (138));
@@ -544,8 +544,8 @@ void ChaosGrainEditor::resized()
     buttons.removeFromRight (9);
     loadButton.setBounds (buttons.removeFromRight (78));
     buttons.removeFromRight (12);
-    syncButton.setBounds (buttons.removeFromRight (78));
-    holdButton.setBounds (buttons.removeFromRight (78));
+    syncButton.setBounds (buttons.removeFromRight (92));
+    holdButton.setBounds (buttons.removeFromRight (96));
 
     area.removeFromTop (9);
     waveform.setBounds (area.removeFromTop (juce::jmax (120, area.getHeight() / 4)));

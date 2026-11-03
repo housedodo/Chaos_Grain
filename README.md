@@ -3,6 +3,12 @@
 A granular "chaos" sampler instrument (VST3 / AU / Standalone). Load a sample and it chops,
 scatters, re-pitches, reverses and re-orders it into pads, glitches, stutters and chops.
 
+![ChaosGrain](docs/screenshot.png)
+
+The UI is drawn in a low-poly, late-90s console style: everything renders at low resolution with
+15-bit colour and dithering, knobs are flat-shaded 3D meshes with vertex snapping, and every
+playing grain shows up as a spinning cube.
+
 ## Using it
 
 1. Put it on an instrument/MIDI track in your DAW.
@@ -24,7 +30,7 @@ The dots on the waveform are the grains currently playing; the white line is the
 | | **Jitter** | Timing randomness (in sync mode: chance to skip a step) |
 | | **Shape** | 0 = hard-edged chop, 100 = smooth bell |
 | Pitch / Order | **Pitch** | Transpose |
-| | **Pitch Chaos** | Random pitch per grain (±semitones) |
+| | **Pitch Rnd** | Random pitch per grain (±semitones) |
 | | **Quantize** | Snap the random pitch to semitones, octaves or 5ths+octaves |
 | | **Reverse** | Chance a grain plays backwards |
 | | **Slices** | Cuts the sample into N equal chops; grains start on slice boundaries |

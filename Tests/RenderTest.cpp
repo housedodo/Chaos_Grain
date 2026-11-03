@@ -82,5 +82,27 @@ int main (int argc, char** argv)
     std::printf ("state round-trip %s\n", stateOk ? "OK" : "FAIL");
     if (! stateOk) ++failures;
 
+    // Optional: capture the editor with grains playing (needs a display).
+    if (argc > 3)
+    {
+        proc->applyPreset (argc > 4 ? juce::String (argv[4]).getIntValue() : 1);
+        proc->apvts.getParameter ("hold")->setValueNotifyingHost (1.0f);
+        proc->setPlayConfigDetails (0, 2, sr, block);
+        proc->prepareToPlay (sr, block);
+        juce::AudioBuffer<float> buf (2, block);
+        juce::MidiBuffer midi;
+        for (int i = 0; i < (int) (sr * 3.0) / block; ++i)
+            proc->processBlock (buf, midi);
+
+        std::unique_ptr<juce::AudioProcessorEditor> editor (proc->createEditor());
+        editor->setVisible (true);
+        const auto snap = editor->createComponentSnapshot (editor->getLocalBounds(), true, 2.0f);
+        juce::File out (argv[3]);
+        out.deleteFile();
+        juce::FileOutputStream os (out);
+        juce::PNGImageFormat().writeImageToStream (snap, os);
+        std::printf ("screenshot -> %s\n", argv[3]);
+    }
+
     return failures == 0 ? 0 : 1;
 }

@@ -49,7 +49,7 @@ public:
     GrainEngine engine;
 
     static juce::StringArray rateNames() { return { "1/1", "1/2", "1/4", "1/8", "1/16", "1/32", "1/8T", "1/16T" }; }
-    static juce::StringArray quantNames() { return { "Free", "Semitones", "Octaves", "5ths + Oct" }; }
+    static juce::StringArray quantNames() { return { "Free", "Semis", "Octaves", "5th+Oct" }; }
 
 private:
     static juce::AudioProcessorValueTreeState::ParameterLayout createLayout();
