@@ -42,7 +42,7 @@ jobs:
           mkdir -p out
           find build -path "*_artefacts/Release/VST3/*.vst3" -maxdepth 5 -exec cp -R {} out/ \;
           find build -path "*_artefacts/Release/AU/*.component" -maxdepth 5 -exec cp -R {} out/ \; || true
-          find build -path "*_artefacts/Release/Standalone/*" -maxdepth 5 -mindepth 4 -exec cp -R {} out/ \; || true
+          find build -path "*_artefacts/Release/Standalone/*" -maxdepth 4 -mindepth 4 -exec cp -R {} out/ \; || true
           ls -la out
 
       - uses: actions/upload-artifact@v4
