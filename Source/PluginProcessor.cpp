@@ -44,7 +44,7 @@ APVTS::ParameterLayout ChaosGrainProcessor::createLayout()
             { return v >= 1000.0f ? String (v / 1000.0f, 2) + " s" : String (roundToInt (v)) + " ms"; }));
     };
 
-    layout.add (pct ("position", "Position", 0.3f));
+    layout.add (pct ("position", "Position", kIsFx ? 1.0f : 0.3f)); // FX: 1.0 = right now
     layout.add (std::make_unique<AudioParameterFloat> (ParameterID { "scan", 1 }, "Scan", NormalisableRange<float> (-2.0f, 2.0f), 0.0f,
         AudioParameterFloatAttributes().withStringFromValueFunction ([] (float v, int) { return String (v, 2) + "x"; })));
     layout.add (pct ("spray", "Spray", 0.1f));
@@ -333,8 +333,8 @@ void ChaosGrainProcessor::randomize()
     auto rnd = [&r] (float lo, float hi) { return lo + r.nextFloat() * (hi - lo); };
     auto chance = [&r] (float p) { return r.nextFloat() < p; };
 
-    setParam ("position",  rnd (0.0f, 1.0f));
-    setParam ("scan",      chance (0.5f) ? 0.0f : rnd (-1.0f, 1.0f));
+    setParam ("position",  kIsFx ? rnd (0.7f, 1.0f) : rnd (0.0f, 1.0f));
+    setParam ("scan",      kIsFx || chance (0.5f) ? 0.0f : rnd (-1.0f, 1.0f));
     setParam ("spray",     rnd (0.0f, 0.6f));
     setParam ("size",      std::exp (rnd (std::log (15.0f), std::log (900.0f))));
     setParam ("density",   std::exp (rnd (std::log (2.0f), std::log (60.0f))));
@@ -387,6 +387,9 @@ void ChaosGrainProcessor::applyPreset (int index)
     setParam ("sync", p.sync ? 1.0f : 0.0f);
     setParam ("rate", (float) p.rate);   setParam ("attack", p.attack);   setParam ("release", p.release);
     setParam ("chaos", 1.0f);
+
+    // Presets are designed around a sample; on live input play from "now".
+    if (kIsFx) { setParam ("position", 1.0f); setParam ("scan", 0.0f); }
 
     static const float presetSpace[] = { 0.2f, 0.55f, 0.65f, 0.1f, 0.25f, 0.15f, 0.5f, 0.45f };
     static const float presetFilter[] = { 20000.0f, 9000.0f, 20000.0f, 20000.0f, 3500.0f, 20000.0f, 7000.0f, 20000.0f };

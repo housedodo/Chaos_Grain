@@ -111,6 +111,20 @@ int main (int argc, char** argv)
         check (maxDiff < 1.0e-4f, "mix 0%: output == input (max diff)", maxDiff);
     }
 
+    // 1b. Latency: wet sound should follow a note quickly with default settings
+    {
+        Rig r (input);
+        r.set ("mix", 1.0f); r.set ("space", 0.0f);
+        r.run (1.0, true);                         // silence
+        auto out = r.run (1.0);                    // then the loop starts
+        const int win = (int) (0.005 * sr);
+        int firstLoud = -1;
+        for (int s = 0; s + win < out.getNumSamples(); s += win)
+            if (out.getRMSLevel (0, s, win) > 0.005f) { firstLoud = s; break; }
+        const float ms = firstLoud < 0 ? 9999.0f : (float) (firstLoud / sr * 1000.0);
+        check (ms < 80.0f, "latency: wet onset after input (ms)", ms);
+    }
+
     // 2. Wet signal, freeze holds sound over silence, unfreeze decays
     {
         Rig r (input);

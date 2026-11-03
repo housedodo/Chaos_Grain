@@ -34,7 +34,9 @@ set by the presets and RAND, and every one of them can be automated from your DA
 - **Mix** (FX): dry/wet (equal-power). Gain only affects the wet signal, so 0% is a clean bypass.
 - **Repeat** (FX): feedback. The filtered grain output is fed back into the buffer, so
   sounds smear and build up; a soft limiter in the loop keeps it stable.
-- **Memory** (FX): how far back in time grains reach (0.1 to 8 s).
+- **Memory** (FX): how far back in time grains reach (0.1 to 8 s). Grains start from "now" by
+  default (about 10 ms behind your playing); Spray scatters them up to 0.5 s into the past.
+- **Freeze** (FX): stops recording and loops the last *Memory* seconds as a granular phrase.
 - **Filter / Reso**: resonant low-pass on the grains (inside the feedback loop in FX, so repeats get darker).
 - **Space**: reverb.
 

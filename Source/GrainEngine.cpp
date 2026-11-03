@@ -181,6 +181,13 @@ void GrainEngine::spawnGrain (const SourceView& src, const GrainParams& p, float
             slice = rng.nextInt (p.slices);
         startNorm = (float) slice * sliceLen + rand01() * p.spray * chaos * sliceLen;
     }
+    else if (live)
+    {
+        // Live: spray only reaches back into the past (1.0 = right now).
+        // Spray reaches at most 0.5 s back (independent of Memory) so it stays tight.
+        const float sprayNorm = p.spray * chaos * (float) (0.5 * sr / liveWindow);
+        startNorm = juce::jlimit (0.0f, 1.0f, currentBase - rand01() * sprayNorm);
+    }
     else
     {
         startNorm = wrap01 (currentBase + randBi() * p.spray * chaos * 0.5f);
@@ -199,10 +206,13 @@ void GrainEngine::spawnGrain (const SourceView& src, const GrainParams& p, float
     double startPos;
     if (live)
     {
-        // Read from the recent past. The grain must never overtake the write head:
-        // forwards it travels ratio*len while the head moves len; backwards it starts
-        // ratio*len ahead of its start. Keeping it ratio*len (min len) back covers both.
-        const double back = (double) lengthOut * juce::jmax (1.0, ratio) + 64.0;
+        // Read from the recent past without ever overtaking the write head.
+        // Forwards, the head moves len while the grain moves ratio*len, so only
+        // pitched-up grains need a head start of (ratio-1)*len; normal and pitched-down
+        // grains can start right behind "now" (minimal latency). Reversed grains start
+        // ratio*len ahead of their origin, so they need that much history.
+        const double back = (reversed ? ratio * lengthOut
+                                      : juce::jmax (0.0, (ratio - 1.0) * lengthOut)) + 4.0;
         const double reach = juce::jlimit (1.0, juce::jmax (1.0, (double) len - back - 64.0), liveWindow);
         startPos = (double) writeHead - back - (1.0 - (double) startNorm) * reach;
         startPos -= std::floor (startPos / len) * len;
@@ -285,7 +295,12 @@ void GrainEngine::render (juce::AudioBuffer<float>& out, int startSample, int nu
     {
         liveWindow = juce::jmax (1.0, (double) p.memorySec * sr);
         liveSpan = juce::jmin ((double) juce::jmax (1, ringLen - 1), liveWindow + sizeSamples + 64.0);
-        scanInc = (double) p.scan / liveWindow; // 1x = moves through the window in real time
+        // 1x = moves through the window in real time. While frozen, the position also
+        // plays through the frozen window at normal speed: FREEZE loops the last
+        // MEMORY seconds as a granular phrase. Unfreezing snaps back to "now".
+        scanInc = ((double) p.scan + (p.freeze ? 1.0 : 0.0)) / liveWindow;
+        if (wasFrozen && ! p.freeze) scanPhase = 0.0;
+        wasFrozen = p.freeze;
     }
     else if (srcLen > 0)
     {
@@ -329,7 +344,11 @@ void GrainEngine::render (juce::AudioBuffer<float>& out, int startSample, int nu
 
         scanPhase += scanInc;
         scanPhase -= std::floor (scanPhase);
-        currentBase = wrap01 (p.position + (float) scanPhase);
+        {
+            // Live: 1.0 means "now" and must not wrap round to 0 (the oldest audio).
+            const float b = p.position + (float) scanPhase;
+            currentBase = live ? (b > 1.0f ? b - std::floor (b) : b) : wrap01 (b);
+        }
 
         // Scheduler
         if (srcLen > 0)
@@ -449,7 +468,7 @@ void GrainEngine::publishUiState()
 
     if (live)
     {
-        const double back = sizeSamples + 64.0 + (1.0 - (double) currentBase) * liveWindow;
+        const double back = 4.0 + (1.0 - (double) currentBase) * liveWindow;
         uiPlayhead.store ((float) juce::jlimit (0.0, 1.0, 1.0 - back / liveSpan), std::memory_order_relaxed);
         uiWriteHead.store (writeHead, std::memory_order_relaxed);
         uiSpan.store (liveSpan, std::memory_order_relaxed);

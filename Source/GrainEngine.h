@@ -151,6 +151,7 @@ private:
     int ringLen = 0;
     int writeHead = 0;
     float fbL = 0.0f, fbR = 0.0f;
+    bool wasFrozen = false;
     double liveWindow = 1.0;     // samples grains may reach back (excluding safety margin)
     double liveSpan = 1.0;       // samples shown in the UI
     double sizeSamples = 0.0;
