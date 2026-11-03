@@ -178,7 +178,18 @@ void KeyDetector::trackNotes (float total)
         if (arg < 0) break;
         if (it == 0) first = best;
         else if (best < 0.3f * first) break;
-        found[(size_t) count++] = arg;
+
+        // Once the key is known, weak notes outside it are most likely analysis ghosts
+        // (a resonator on a wrong semitone sounds sour); strong ones are really played.
+        bool keep = true;
+        if (valid && best < 0.6f * first)
+        {
+            static const int majorSteps[7] = { 0, 2, 4, 5, 7, 9, 11 }, minorSteps[7] = { 0, 2, 3, 5, 7, 8, 10 };
+            const int pc = ((arg - keyRoot) % 12 + 12) % 12;
+            keep = false;
+            for (int s : (minor ? minorSteps : majorSteps)) keep |= s == pc;
+        }
+        if (keep) found[(size_t) count++] = arg;
 
         // cancel this note's harmonics
         const float f0 = 440.0f * std::pow (2.0f, (float) (arg - 69) / 12.0f);
