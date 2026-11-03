@@ -32,7 +32,7 @@ juce_add_plugin(ChaosGrain
     COPY_PLUGIN_AFTER_BUILD FALSE
     PLUGIN_MANUFACTURER_CODE Chgr
     PLUGIN_CODE Cgr1
-    FORMATS VST3 AU Standalone
+    FORMATS VST3 AU
     VST3_CATEGORIES Instrument Sampler
     AU_MAIN_TYPE kAudioUnitType_MusicDevice)
 
@@ -47,7 +47,7 @@ juce_add_plugin(ChaosGrainFX
     COPY_PLUGIN_AFTER_BUILD FALSE
     PLUGIN_MANUFACTURER_CODE Chgr
     PLUGIN_CODE Cgf1
-    FORMATS VST3 AU Standalone
+    FORMATS VST3 AU
     VST3_CATEGORIES Fx Delay Reverb
     AU_MAIN_TYPE kAudioUnitType_Effect)
 

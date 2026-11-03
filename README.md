@@ -1,6 +1,6 @@
 # ChaosGrain
 
-A granular "chaos" sampler instrument (VST3 / AU / Standalone). Load a sample and it chops,
+A granular "chaos" sampler instrument and effect (VST3). Load a sample and it chops,
 scatters, re-pitches, reverses and re-orders it into pads, glitches, stutters and chops.
 
 ![ChaosGrain instrument (left) and ChaosGrain FX (right)](docs/screenshot.png)
@@ -104,7 +104,7 @@ The bright blocks on the screen are the grains currently playing; the dotted lin
 ## Getting a build
 
 ### Easiest: GitHub Actions
-Every push builds the Windows version (VST3 + standalone `.exe`) via `.github/workflows/build.yml`.
+Every push builds the Windows VST3 plugins via `.github/workflows/build.yml`.
 Download it from the run's **Artifacts** section. macOS and Linux builds can be re-enabled by
 uncommenting them in the workflow's build matrix.
 
@@ -120,9 +120,8 @@ cmake --build build --config Release
 The plugin ends up in `build/ChaosGrain_artefacts/Release/`.
 
 ### Installing
-- **Windows:** copy `ChaosGrain.vst3` and `ChaosGrain FX.vst3` to `C:\Program Files\Common Files\VST3\`.
-  The standalone apps are `ChaosGrain.exe` and `ChaosGrain FX.exe` (the FX one uses your audio
-  interface input: pick it under Options > Audio/MIDI Settings and use headphones to avoid feedback).
+- **Windows:** close your DAW, then copy the `ChaosGrain.vst3` and `ChaosGrain FX.vst3` folders to
+  `C:\Program Files\Common Files\VST3\` and rescan plugins.
 - **macOS:** copy `ChaosGrain.vst3` to `~/Library/Audio/Plug-Ins/VST3/` and `ChaosGrain.component`
   to `~/Library/Audio/Plug-Ins/Components/`. Unsigned builds downloaded from the internet may need
   `xattr -cr ~/Library/Audio/Plug-Ins/VST3/ChaosGrain.vst3` before your DAW will load them.
