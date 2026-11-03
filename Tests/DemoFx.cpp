@@ -20,6 +20,17 @@ namespace
 
     struct Caption { double start; const char* step; const char* title; std::vector<const char*> body; };
 
+    // Demo 2: RESONATE in depth (BLOOM, sympathetic strings, ambient pads)
+    const std::vector<Caption> resonateCaptions = {
+        { 0.0,  "",            "RESONATE",       { "INPUT: A SAW NOTE, THEN TWO", "CHORDS (A MIN, F MAJ7), WITH", "ROOM TO BREATHE. MIX 0% = DRY." } },
+        { 8.0,  "NEW",         "BLOOM",          { "THE RESONANCE DUCKS WHILE", "YOU PLAY AND SWELLS UP", "WHEN YOU LET GO." } },
+        { 24.0, "NEW",         "SYMPATHETIC",    { "EACH NOTE ALSO RINGS A WARM", "SUB OCTAVE, A FIFTH IN KEY", "AND AN OCTAVE UP." } },
+        { 40.0, "SHAPE HIGH",  "AMBIENT PAD",    { "LONG, WIDE, WARM: DETUNED", "STEREO PAIRS, DARKER RING,", "BIG SPACE. CHILLWAVE READY." } },
+        { 56.0, "CLICK SCREEN","FREEZE",         { "HOLD THE PAD FOREVER AND", "PLAY OVER IT." } },
+        { 64.0, "SHAPE MAX",   "ENDLESS SWELL",  { "CHAOS ADDS DRIFT AND", "RE-PLUCKS ON THE BEAT." } },
+    };
+    bool resonateDemo = false;
+
     const std::vector<Caption> captions = {
         { 0.0,  "",            "CHAOS GRAIN FX", { "THE INPUT: ONE SAW NOTE (A3),", "THEN A SAW CHORD (A MINOR).", "MIX 0% = JUST THE DRY SOUND." } },
         { 8.0,  "ENGINE 1",    "RESONATE",       { "RESONATORS TUNE TO THE NOTES", "YOU PLAY AND RING ON IN YOUR", "OWN SOUND. SHAPE LOW = ECHO." } },
@@ -38,8 +49,9 @@ namespace
 
     const Caption& captionAt (double t)
     {
-        const Caption* c = &captions.front();
-        for (auto& x : captions) if (t >= x.start) c = &x;
+        const auto& list = resonateDemo ? resonateCaptions : captions;
+        const Caption* c = &list.front();
+        for (auto& x : list) if (t >= x.start) c = &x;
         return *c;
     }
 
@@ -49,10 +61,11 @@ namespace
         return a + (b - a) * (0.5f - 0.5f * std::cos (p * juce::MathConstants<float>::pi));
     }
 
-    // One phrase of input: a saw note, then a saw chord (additive, band-limited)
+    // One phrase of input: a saw note, then a saw chord (additive, band-limited).
+    // The RESONATE demo uses a slower 8 s phrase with gaps so BLOOM can be heard.
     juce::AudioBuffer<float> makePhrase()
     {
-        juce::AudioBuffer<float> b (1, (int) (phrase * sr));
+        juce::AudioBuffer<float> b (1, (int) ((resonateDemo ? 8.0 : phrase) * sr));
         b.clear();
         auto saw = [&] (float f, double t0, double t1)
         {
@@ -65,6 +78,13 @@ namespace
                 b.addSample (0, i, 0.13f * s * env);
             }
         };
+        if (resonateDemo)
+        {
+            saw (220.0f, 0.0, 1.0);                                              // A3
+            for (float f : { 220.0f, 261.63f, 329.63f }) saw (f, 2.0, 3.3);       // A minor
+            for (float f : { 174.61f, 220.0f, 261.63f, 329.63f }) saw (f, 4.8, 6.1); // F maj7
+            return b;
+        }
         saw (220.0f, 0.0, 1.6);                          // A3
         for (float f : { 220.0f, 261.63f, 329.63f }) saw (f, 2.0, 3.6); // A minor
         return b;
@@ -74,13 +94,14 @@ namespace
 int main (int argc, char** argv)
 {
     juce::ScopedJuceInitialiser_GUI init;
-    if (argc < 2) { std::puts ("usage: DemoFx <outdir>"); return 2; }
+    if (argc < 2) { std::puts ("usage: DemoFx <outdir> [resonate]"); return 2; }
+    resonateDemo = argc > 2 && juce::String (argv[2]) == "resonate";
 
     const juce::File outDir (argv[1]);
     outDir.createDirectory();
     const auto videoOnly = outDir.getChildFile ("video_only.mp4");
     const auto audioFile = outDir.getChildFile ("audio.wav");
-    const auto finalFile = outDir.getChildFile ("ChaosGrainFX_demo.mp4");
+    const auto finalFile = outDir.getChildFile (resonateDemo ? "ChaosGrainFX_resonate_demo.mp4" : "ChaosGrainFX_demo.mp4");
 
     std::unique_ptr<ChaosGrainProcessor> proc (static_cast<ChaosGrainProcessor*> (createPluginFilter()));
     proc->setPlayConfigDetails (2, 2, sr, blockSize);
@@ -102,7 +123,7 @@ int main (int argc, char** argv)
     retro::ditherGradient (bgLow, bgLow.getBounds(), juce::Colour (0xff24222b), juce::Colour (0xff0d0c11), 6);
 
     const auto input = makePhrase();
-    const double duration = 96.0;
+    const double duration = resonateDemo ? 74.0 : 96.0;
     const int totalFrames = (int) (duration * fps);
     juce::AudioBuffer<float> audio (2, totalFrames * blocksPerFrame * blockSize);
     audio.clear();
@@ -123,8 +144,19 @@ int main (int argc, char** argv)
     {
         const double t = (double) f / fps;
 
-        // ---------------- Script ----------------
-        if (t < 8.0)       { setP ("engine", 0.0f); setP ("mix", 0.0f); setP ("shape", 0.15f); setP ("chaos", 0.0f); }
+ // ---------------- Script ----------------
+        if (resonateDemo)
+        {
+            setP ("engine", 0.0f);
+            if (t < 8.0)       { setP ("mix", 0.0f); setP ("shape", 0.3f); setP ("chaos", 0.05f); }
+            else if (t < 24.0) { setP ("mix", sweep (t, 8.0, 9.0, 0.0f, 0.6f)); setP ("shape", 0.3f); }
+            else if (t < 40.0) { setP ("shape", sweep (t, 24.0, 26.0, 0.3f, 0.55f)); }
+            else if (t < 56.0) { setP ("shape", sweep (t, 40.0, 44.0, 0.55f, 0.85f)); setP ("chaos", sweep (t, 40.0, 44.0, 0.05f, 0.3f)); setP ("mix", sweep (t, 40.0, 42.0, 0.6f, 0.7f)); }
+            else if (t < 64.0) { setP ("freeze", t < 63.0 ? 1.0f : 0.0f); }
+            else               { setP ("freeze", 0.0f); setP ("shape", sweep (t, 64.0, 66.0, 0.85f, 1.0f)); setP ("chaos", 0.55f);
+                                 setP ("mix", t < 71.0 ? 0.7f : sweep (t, 71.0, 74.0, 0.7f, 0.0f)); }
+        }
+        else if (t < 8.0)       { setP ("engine", 0.0f); setP ("mix", 0.0f); setP ("shape", 0.15f); setP ("chaos", 0.0f); }
         else if (t < 16.0) { setP ("mix", sweep (t, 8.0, 9.0, 0.0f, 0.65f)); }
         else if (t < 26.0) { setP ("shape", sweep (t, 16.0, 25.0, 0.15f, 0.92f)); }
         else if (t < 33.0) { setP ("shape", 0.6f); setP ("chaos", sweep (t, 26.0, 31.0, 0.0f, 0.85f)); }
@@ -183,8 +215,18 @@ int main (int argc, char** argv)
             }
 
             // What is being played right now
-            const double ph = std::fmod (t, phrase);
-            const char* playing = ph < 1.6 ? "NOTE  A3" : (ph >= 2.0 && ph < 3.6) ? "CHORD A MINOR" : "-";
+            const char* playing;
+            if (resonateDemo)
+            {
+                const double ph2 = std::fmod (t, 8.0);
+                playing = ph2 < 1.0 ? "NOTE  A3" : (ph2 >= 2.0 && ph2 < 3.3) ? "CHORD A MINOR"
+                        : (ph2 >= 4.8 && ph2 < 6.1) ? "CHORD F MAJ7" : "- (LET GO)";
+            }
+            else
+            {
+                const double ph = std::fmod (t, phrase);
+                playing = ph < 1.6 ? "NOTE  A3" : (ph >= 2.0 && ph < 3.6) ? "CHORD A MINOR" : "-";
+            }
             retro::pixelText (g, "INPUT", { cx, 420, 200, 20 }, retro::pal::dim, juce::Justification::topLeft, 2);
             retro::pixelText (g, playing, { cx + 84, 420, cw - 84, 20 }, retro::pal::cyan, juce::Justification::topLeft, 2);
 

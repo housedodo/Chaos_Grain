@@ -43,8 +43,8 @@ engine is a complex chain inside; the knobs are macros.
 
 | | **RESONATE** | **SPECTRAL** | **PATTERN** |
 |---|---|---|---|
-| Idea | Your own notes ring on: resonators tune to the notes you play and are fed by your sound | A harmoniser working on the frequencies of your sound | Your playing turned into new melodies & rhythms |
-| **SHAPE** | BLOOM: short echo -> long sustain -> endless swell + octave shimmer | TUNE (frequencies pulled to the key, resonant peaks) -> HARMONICS (octave down / up, fifth) | note length -> reverse & glide |
+| Idea | Your own notes ring on: resonators tune to the notes you play, fed by your sound, with sympathetic strings (warm sub octave, fifth in key, octave up) and a BLOOM that swells when you let go | A harmoniser working on the frequencies of your sound | Your playing turned into new melodies & rhythms |
+| **SHAPE** | size: short echo -> long sustain -> endless, wide, warm ambient pad (deeper bloom, darker ring, bigger space) | TUNE (frequencies pulled to the key, resonant peaks) -> HARMONICS (octave down / up, fifth) | note length -> reverse & glide |
 | **CHAOS** | slow detune drift (chorus) + re-plucks of your last notes on the beat | slow, smooth emphasis drifting across the scale; harmonic layers swell in turn | harmony echoes -> arps -> cascades -> shuffle -> stutter |
 | **MIX** | dry / wet | dry / wet | dry / wet |
 

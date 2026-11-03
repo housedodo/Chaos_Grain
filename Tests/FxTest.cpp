@@ -78,6 +78,14 @@ namespace
         return s1 * s1 + s2 * s2 - cw * s1 * s2;
     }
 
+    // Energy in a narrow band (+/-2.5%) around a frequency
+    float bandEnergy (const juce::AudioBuffer<float>& b, int from, float freq)
+    {
+        float e = 0.0f;
+        for (int k = -4; k <= 4; ++k) e += goertzel (b, from, freq * (1.0f + 0.006f * (float) k));
+        return e;
+    }
+
     // Pitch classes present (energy > 8% of the strongest) between 100 Hz and 1 kHz
     int countPitchClasses (const juce::AudioBuffer<float>& b, int from)
     {
@@ -202,36 +210,70 @@ int main (int argc, char** argv)
     };
     const std::vector<float> cMajor { 130.81f, 164.81f, 196.0f }; // C3 E3 G3
 
-    // 4. RESONATE: tracks the chord, rings in its notes (and only those), BLOOM sustains
+    // 4. RESONATE: tracks the chord, rings in its notes + sympathetic octave/fifth, wide,
+    //    BLOOM swells after you let go
     {
         Rig r (sawChord (cMajor, 3.0, 3.0));
         r.set ("engine", 0.0f); r.set ("mix", 1.0f); r.set ("shape", 0.5f); r.set ("chaos", 0.0f);
         auto out = r.run (2.9);
         int notes[KeyDetector::maxNotes];
         const int n = r.proc->keyDetector.getNotes (notes);
-        bool hasC = false, hasE = false, hasG = false;
-        for (int i = 0; i < n; ++i) { hasC |= notes[i] == 48; hasE |= notes[i] == 52; hasG |= notes[i] == 55; }
         std::printf ("   (tracked notes:");
         for (int i = 0; i < n; ++i) std::printf (" %d", notes[i]);
         std::printf (")\n");
+        bool hasC = false, hasE = false, hasG = false;
+        for (int i = 0; i < n; ++i) { hasC |= notes[i] == 48; hasE |= notes[i] == 52; hasG |= notes[i] == 55; }
         check (hasC && hasE && hasG && n <= 4, "note tracking: saw C-E-G chord -> C3 E3 G3 (notes found)", (float) n);
 
         std::array<float, 12> pc {};
-        for (int midi = 40; midi <= 84; ++midi)
+        for (int midi = 28; midi <= 84; ++midi)
             pc[(size_t) (midi % 12)] += goertzel (out, (int) sr, 440.0f * std::pow (2.0f, (float) (midi - 69) / 12.0f));
-        float in = pc[0] + pc[4] + pc[7], all = 0.0f;
+        float all = 0.0f;
         for (float v : pc) all += v;
-        check (in / all > 0.8f, "resonate: rings in the played chord (energy share)", in / all);
+        const float chordAndFifths = pc[0] + pc[4] + pc[7] + pc[11] + pc[2];   // C E G + fifths B D
+        check (chordAndFifths / all > 0.85f, "resonate: rings in chord + its fifths (energy share)", chordAndFifths / all);
+        const int from = (int) sr;
+        const float e3 = bandEnergy (out, from, 164.81f);                       // played E3
+        const float b3 = bandEnergy (out, from, 246.94f), d4 = bandEnergy (out, from, 293.66f); // fifths of E3, G3
+        check ((b3 + d4) / e3 > 0.02f, "resonate: sympathetic fifths ring (B3+D4 vs E3)", (b3 + d4) / e3);
+        const float c2 = bandEnergy (out, from, 65.41f), c3 = bandEnergy (out, from, 130.81f);
+        check (c2 / c3 > 0.02f, "resonate: sympathetic octave below rings (C2 vs C3)", c2 / c3);
+
+        // stereo width: L and R are detuned pairs
+        double lr = 0.0, ll = 0.0, rr = 0.0;
+        for (int i = (int) sr; i < out.getNumSamples(); ++i)
+        {
+            const double a = out.getSample (0, i), b = out.getSample (1, i);
+            lr += a * b; ll += a * a; rr += b * b;
+        }
+        const float corr = (float) (lr / std::sqrt (ll * rr + 1.0e-12));
+        check (corr < 0.95f && corr > 0.0f, "resonate: wide but mono-safe stereo (L/R correlation)", corr);
+    }
+    {
+        // BLOOM: quieter while the chord is held, swells after release
+        Rig r (sawChord (cMajor, 2.0, 2.0));
+        r.set ("engine", 0.0f); r.set ("mix", 1.0f); r.set ("chaos", 0.0f); r.set ("shape", 0.6f);
+        auto held = r.run (2.0);
+        auto after = r.run (2.0, true);
+        float peakAfter = 0.0f;
+        for (double s0 = 0.0; s0 < 1.5; s0 += 0.25) peakAfter = juce::jmax (peakAfter, rms (after, s0, s0 + 0.25));
+        const float ratio = peakAfter / juce::jmax (1.0e-6f, rms (held, 1.5, 2.0)); // swell vs end of held chord
+        std::printf ("   (held:");
+        for (double s0 = 0.0; s0 < 2.0; s0 += 0.25) std::printf (" %.4f", rms (held, s0, s0 + 0.25));
+        std::printf (" | after:");
+        for (double s0 = 0.0; s0 < 2.0; s0 += 0.25) std::printf (" %.4f", rms (after, s0, s0 + 0.25));
+        std::printf (")\n");
+        check (ratio > 1.25f, "resonate: BLOOM swells after release (swell vs held end)", ratio);
     }
     for (int bloom = 0; bloom < 2; ++bloom)
     {
         Rig r (sawChord (cMajor, 1.0, 1.0));
         r.set ("engine", 0.0f); r.set ("mix", 1.0f); r.set ("chaos", 0.0f); r.set ("shape", bloom ? 0.7f : 0.0f);
         auto note = r.run (1.0);
-        auto tail = r.run (2.5, true);
-        const float rel = rms (tail, 1.0, 2.0) / juce::jmax (1.0e-6f, rms (note, 0.3, 0.9));
-        if (bloom) check (rel > 0.1f, "resonate: shape 0.7 blooms on (level 1-2 s later vs chord)", rel);
-        else       check (rel < 0.02f, "resonate: shape 0 is a short echo (level later vs chord)", rel);
+        auto tail = r.run (3.0, true);
+        const float rel = rms (tail, 2.0, 3.0) / juce::jmax (1.0e-6f, rms (note, 0.3, 0.9));
+        if (bloom) check (rel > 0.1f, "resonate: shape 0.7 = long pad (level 2-3 s later vs chord)", rel);
+        else       check (rel < 0.02f, "resonate: shape 0 = short echo (level 2-3 s later vs chord)", rel);
     }
 
     // 5. SPECTRAL: clean at shape 0, tunes noise into in-key notes, adds octave/fifth harmonics

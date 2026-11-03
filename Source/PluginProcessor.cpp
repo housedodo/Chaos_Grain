@@ -138,7 +138,7 @@ APVTS::ParameterLayout ChaosGrainProcessor::createLayout()
 void ChaosGrainProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
 {
     engine.prepare (sampleRate);
-    resonator.prepare (sampleRate);
+    resonator.prepare (sampleRate, samplesPerBlock);
     spectral.prepare (sampleRate);
     keyDetector.prepare (sampleRate);
     lastEngine = -1;
@@ -417,8 +417,9 @@ void ChaosGrainProcessor::processFx (juce::AudioBuffer<float>& buffer, const Tra
         if (! freeze) resonator.setNotes (notes, numNotes);
         Resonator::Params rp;
         rp.shape = shape; rp.chaos = chaos; rp.freeze = freeze; rp.lock = lock; rp.stepBeats = stepBeats;
+        rp.keyRoot = root; rp.minor = minor; rp.keyValid = keyValid;
         resonator.process (dl, dr, wl, wr, n, rp, transport);
-        space = 0.15f + 0.15f * shape;
+        space = 0.15f + 0.55f * shape; // bigger, longer space as the pad grows
     }
     else if (eng == 1)
     {
@@ -462,6 +463,17 @@ void ChaosGrainProcessor::processFx (juce::AudioBuffer<float>& buffer, const Tra
         }
         buffer.applyGainRamp (0, n, lastLevelMatch, levelMatch);
         lastLevelMatch = levelMatch;
+    }
+
+    // RESONATE: BLOOM (duck while playing, swell after) + gentle warm saturation
+    if (eng == 0)
+    {
+        const float* duck = resonator.duck();
+        for (int ch = 0; ch < numCh; ++ch)
+        {
+            auto* w = buffer.getWritePointer (ch);
+            for (int i = 0; i < n; ++i) w[i] = std::tanh (1.3f * w[i] * duck[i]) / 1.3f;
+        }
     }
 
     // Built-in space for each engine
