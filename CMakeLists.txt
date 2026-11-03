@@ -58,4 +58,11 @@ if(CHAOSGRAIN_TESTS)
     target_include_directories(RenderTest PRIVATE $<TARGET_PROPERTY:ChaosGrain,INCLUDE_DIRECTORIES>)
     target_compile_definitions(RenderTest PRIVATE $<TARGET_PROPERTY:ChaosGrain,COMPILE_DEFINITIONS>)
     target_link_libraries(RenderTest PRIVATE ChaosGrain)
+
+    # Records a captioned demo video of the plugin (Linux; needs ffmpeg + a display).
+    juce_add_console_app(DemoVideo)
+    target_sources(DemoVideo PRIVATE Tests/DemoVideo.cpp)
+    target_include_directories(DemoVideo PRIVATE $<TARGET_PROPERTY:ChaosGrain,INCLUDE_DIRECTORIES>)
+    target_compile_definitions(DemoVideo PRIVATE $<TARGET_PROPERTY:ChaosGrain,COMPILE_DEFINITIONS>)
+    target_link_libraries(DemoVideo PRIVATE ChaosGrain)
 endif()
