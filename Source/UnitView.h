@@ -47,6 +47,8 @@ private:
     std::vector<std::unique_ptr<juce::Slider>> sliders;
     std::vector<std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment>> attachments;
     double randFlashMs = 0.0;
+    int lastOnsets = 0;
+    double onsetFlashMs = 0.0;
 
     std::vector<std::pair<float, float>> peaks;
     int lastSampleVersion = -1;

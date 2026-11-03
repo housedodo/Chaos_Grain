@@ -72,6 +72,35 @@ int main (int argc, char** argv)
         w->writeFromAudioSampleBuffer (out, 0, total);
     }
 
+    // LOCK: on the internal tempo grid (120 bpm, 1/16) a cycle is 16 steps = 2 s.
+    // Locked, bar 2 and bar 3 must be identical; unlocked they must differ.
+    for (int locked = 1; locked >= 0; --locked)
+    {
+        std::unique_ptr<ChaosGrainProcessor> lp (static_cast<ChaosGrainProcessor*> (createPluginFilter()));
+        lp->loadSample (input);
+        lp->applyPreset (5); // Glitch Storm: lots of randomness
+        auto setP = [&] (const char* id, float v) { auto* q = lp->apvts.getParameter (id); q->setValueNotifyingHost (q->convertTo0to1 (v)); };
+        setP ("hold", 1.0f); setP ("sync", 1.0f); setP ("rate", 4.0f); setP ("space", 0.0f); setP ("lock", (float) locked);
+        lp->setPlayConfigDetails (0, 2, sr, block);
+        lp->prepareToPlay (sr, block);
+        const int numBlocks = (int) (sr * 6) / block + 1; // whole blocks only
+        juce::AudioBuffer<float> out (2, numBlocks * block), buf (2, block);
+        juce::MidiBuffer midi;
+        for (int pos = 0; pos < out.getNumSamples(); pos += block)
+        {
+            lp->processBlock (buf, midi);
+            for (int ch = 0; ch < 2; ++ch) out.copyFrom (ch, pos, buf, ch, 0, block);
+        }
+        float maxDiff = 0.0f;
+        const int bar = (int) sr * 2;
+        for (int ch = 0; ch < 2; ++ch)
+            for (int i = 0; i < bar; ++i)
+                maxDiff = std::max (maxDiff, std::abs (out.getSample (ch, bar + i) - out.getSample (ch, 2 * bar + i)));
+        const bool ok = locked ? maxDiff < 1.0e-3f : maxDiff > 0.05f;
+        std::printf ("lock %-3s bar2 vs bar3 max diff %.6f  %s\n", locked ? "on" : "off", maxDiff, ok ? "OK" : "FAIL");
+        if (! ok) ++failures;
+    }
+
     // State round-trip
     juce::MemoryBlock state;
     proc->getStateInformation (state);

@@ -89,6 +89,7 @@ APVTS::ParameterLayout ChaosGrainProcessor::createLayout()
         { return v >= 19900.0f ? String ("OPEN") : v >= 1000.0f ? String (v / 1000.0f, 1) + " kHz" : String (roundToInt (v)) + " Hz"; })));
     layout.add (pct ("reso", "Resonance", 0.1f));
     layout.add (pct ("space", "Space", 0.2f));
+    layout.add (std::make_unique<AudioParameterBool> (ParameterID { "lock", 1 }, "Lock Pattern", false));
 
     // Live input (FX build)
     if (kIsFx)
@@ -101,6 +102,7 @@ APVTS::ParameterLayout ChaosGrainProcessor::createLayout()
         layout.add (std::make_unique<AudioParameterFloat> (ParameterID { "memory", 1 }, "Memory", memRange, 2.0f,
             AudioParameterFloatAttributes().withStringFromValueFunction ([] (float v, int) { return String (v, 2) + " s"; })));
         layout.add (std::make_unique<AudioParameterBool> (ParameterID { "freeze", 1 }, "Freeze", false));
+        layout.add (std::make_unique<AudioParameterBool> (ParameterID { "follow", 1 }, "Follow", false));
     }
 
     return layout;
@@ -159,6 +161,8 @@ GrainParams ChaosGrainProcessor::readParams() const
     p.repeats    = get ("repeats");
     p.memorySec  = getOr ("memory", 2.0f);
     p.freeze     = get ("freeze") > 0.5f;
+    p.follow     = get ("follow") > 0.5f;
+    p.lock       = get ("lock") > 0.5f;
     return p;
 }
 
@@ -329,6 +333,8 @@ void ChaosGrainProcessor::setParam (const juce::String& id, float value)
 
 void ChaosGrainProcessor::randomize()
 {
+    engine.requestNewPattern(); // new random pattern too (also when LOCK is on)
+
     juce::Random r;
     auto rnd = [&r] (float lo, float hi) { return lo + r.nextFloat() * (hi - lo); };
     auto chance = [&r] (float p) { return r.nextFloat() < p; };

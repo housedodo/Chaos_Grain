@@ -30,6 +30,22 @@ namespace
             p->setValueNotifyingHost (p->convertTo0to1 (v));
         }
 
+        // Runs a given input buffer through the plugin.
+        juce::AudioBuffer<float> runBuffer (const juce::AudioBuffer<float>& in)
+        {
+            juce::AudioBuffer<float> out (2, in.getNumSamples()), buf (2, block);
+            juce::MidiBuffer midi;
+            for (int pos = 0; pos < in.getNumSamples(); pos += block)
+            {
+                const int n = juce::jmin (block, in.getNumSamples() - pos);
+                juce::AudioBuffer<float> view (buf.getArrayOfWritePointers(), 2, n);
+                for (int ch = 0; ch < 2; ++ch) view.copyFrom (ch, 0, in, juce::jmin (ch, in.getNumChannels() - 1), pos, n);
+                proc->processBlock (view, midi);
+                for (int ch = 0; ch < 2; ++ch) out.copyFrom (ch, pos, view, ch, 0, n);
+            }
+            return out;
+        }
+
         // Runs `seconds`, feeding the looped input (or silence); returns output.
         juce::AudioBuffer<float> run (double seconds, bool silence = false, juce::AudioBuffer<float>* dryOut = nullptr)
         {
@@ -123,6 +139,31 @@ int main (int argc, char** argv)
             if (out.getRMSLevel (0, s, win) > 0.005f) { firstLoud = s; break; }
         const float ms = firstLoud < 0 ? 9999.0f : (float) (firstLoud / sr * 1000.0);
         check (ms < 80.0f, "latency: wet onset after input (ms)", ms);
+    }
+
+    // 1c. FOLLOW: no grains without notes; one note -> one burst that then stops
+    {
+        Rig r (input);
+        r.set ("mix", 1.0f); r.set ("space", 0.0f); r.set ("follow", 1.0f);
+        r.set ("size", 80.0f); r.set ("density", 40.0f);
+        r.run (3.0);                     // fill the buffer while playing
+        r.set ("freeze", 1.0f);          // keep that material
+        auto quiet = r.run (1.5, true);
+        check (rms (quiet, 0.5) < 0.001f, "follow: silence -> no grains (rms)", rms (quiet, 0.5));
+
+        juce::AudioBuffer<float> hit (1, (int) sr);
+        hit.clear();
+        for (int i = 0; i < (int) (0.3 * sr); ++i)  // piano-like: sharp attack, decay
+            hit.setSample (0, i, 0.5f * std::sin (juce::MathConstants<float>::twoPi * 220.0f * (float) i / (float) sr)
+                                    * std::exp (-(float) i / (float) (0.08 * sr)));
+        const int before = r.proc->engine.uiOnsets.load();
+        auto burst = r.runBuffer (hit);
+        const int onsets = r.proc->engine.uiOnsets.load() - before;
+        const float early = burst.getRMSLevel (0, 0, (int) (0.25 * sr));
+        const float late = burst.getRMSLevel (0, (int) (0.6 * sr), (int) (0.4 * sr));
+        check (onsets == 1, "follow: one note -> one onset (count)", (float) onsets);
+        check (early > 0.005f, "follow: burst after the note (rms)", early);
+        check (late < 0.001f, "follow: burst ends (rms)", late);
     }
 
     // 2. Wet signal, freeze holds sound over silence, unfreeze decays

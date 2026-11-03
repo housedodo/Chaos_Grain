@@ -13,6 +13,13 @@ Everything lives on one compact pixel-art "grain unit":
   **FILTER · SPACE · REPEAT · MEMORY** (FX).
 - **Small buttons** at the top: the red **HOLD** (instrument: drone without MIDI) or **FREEZE**
   (FX), **SYNC** (lock grains to the DAW tempo; lights up when on) and **RAND** (randomize).
+- **LOCK** (both): the randomness repeats as a loop. Random choices run in cycles of 16 grain
+  events; LOCK keeps repeating the cycle you are hearing (with SYNC on: exactly 16 steps of the
+  tempo grid, e.g. one bar at 1/16). RAND rolls a new pattern, which then repeats.
+- **FOLLOW** (FX): grains fire on the notes you play instead of on a clock. Every detected note
+  opens a short burst (at least 150 ms, about three grains long) starting on the attack; silence
+  means no grains. With LOCK on, every note gets the same burst pattern. With FREEZE on, your
+  playing triggers bursts from the frozen loop. The button blinks on each detected note.
 - The LED flickers while grains play, the green display counts active grains (and shows a knob's
   value while you turn it), and the LED row shows density.
 - **Click the screen or drop a file on it** to load a sample (instrument). **Double-click** a knob to reset it.
@@ -30,6 +37,7 @@ set by the presets and RAND, and every one of them can be automated from your DA
 | Big knobs | SIZE · CHAOS · PITCH | SIZE · CHAOS · MIX |
 | Small knobs | FILTER · RESO · SPACE | FILTER · SPACE · REPEAT · MEMORY |
 | Red button | HOLD (drone without MIDI) | FREEZE (stop recording, keep playing the buffer) |
+| Mode buttons | LOCK | LOCK · FOLLOW |
 
 - **Mix** (FX): dry/wet (equal-power). Gain only affects the wet signal, so 0% is a clean bypass.
 - **Repeat** (FX): feedback. The filtered grain output is fed back into the buffer, so

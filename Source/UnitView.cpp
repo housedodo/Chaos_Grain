@@ -230,6 +230,9 @@ namespace
     const juce::Rectangle<int> powerRect { 8, 7, 12, 8 };
     const juce::Rectangle<int> syncRect { 33, 7, 12, 8 };
     const juce::Rectangle<int> randRect { 51, 7, 12, 8 };
+    // Middle-right panel: LOCK (+ FOLLOW in FX)
+    const juce::Rectangle<int> lockRect   { kIsFx ? 68 : 66, 94, 12, 8 };
+    const juce::Rectangle<int> followRect { 96, 94, 12, 8 };
 
     // Small push-button: grey cap, lit when on.
     void drawMiniButton (Canvas& c, juce::Rectangle<int> r, bool on, juce::Colour litColour)
@@ -486,13 +489,30 @@ void UnitView::render (juce::Image& img)
     c.rect (10, 100, 46, 8, col::segBg);
     sevenSeg (c, 58 - 4 - 5 * 8, 99, readout, 5);
 
-    // --- Density LEDs ---
+    // --- LOCK / FOLLOW panel ---
     c.bevel (62, 92, 58, 18, col::panel, 2, false);
-    const bool sync = proc.apvts.getRawParameterValue ("sync")->load() > 0.5f;
-    const float dens = sync ? proc.apvts.getParameter ("rate")->getValue() : proc.apvts.getParameter ("density")->getValue();
-    const int lit = juce::jlimit (1, 6, (int) std::ceil (dens * 6.0f));
-    for (int i = 0; i < 6; ++i) drawLed (c, 68 + i * 8, 97, i < lit);
-    c.small (sync ? "SYNC RATE" : "DENSITY", 91, 104, col::label, true);
+    const bool lockOn = proc.apvts.getRawParameterValue ("lock")->load() > 0.5f;
+    drawMiniButton (c, lockRect, lockOn, col::seg);
+    c.small ("LOCK", lockRect.getCentreX(), 104, col::label, true);
+
+    if (kIsFx)
+    {
+        const int onsets = proc.engine.uiOnsets.load (std::memory_order_relaxed);
+        if (onsets != lastOnsets) { lastOnsets = onsets; onsetFlashMs = nowMs; }
+        const bool followOn = proc.apvts.getRawParameterValue ("follow")->load() > 0.5f;
+        const bool flash = followOn && nowMs - onsetFlashMs < 90.0;
+        drawMiniButton (c, followRect, followOn, flash ? juce::Colour (0xffeaffd8) : col::led);
+        c.small ("FOLLOW", followRect.getCentreX(), 104, col::label, true);
+    }
+    else
+    {
+        // Instrument: small density meter next to LOCK
+        const bool sync = proc.apvts.getRawParameterValue ("sync")->load() > 0.5f;
+        const float dens = sync ? proc.apvts.getParameter ("rate")->getValue() : proc.apvts.getParameter ("density")->getValue();
+        const int lit = juce::jlimit (1, 4, (int) std::ceil (dens * 4.0f));
+        for (int i = 0; i < 4; ++i) drawLed (c, 87 + i * 7, 97, i < lit);
+        c.small (sync ? "RATE" : "DENSITY", 98, 104, col::label, true);
+    }
 
     // --- Knobs ---
     c.bevel (6, 114, 116, 50, col::panel, 3, false);
@@ -544,6 +564,16 @@ void UnitView::mouseDown (const juce::MouseEvent& e)
         auto* sync = proc.apvts.getParameter ("sync");
         sync->setValueNotifyingHost (sync->getValue() > 0.5f ? 0.0f : 1.0f);
     }
+    else if (lockRect.expanded (1).contains (p))
+    {
+        auto* lock = proc.apvts.getParameter ("lock");
+        lock->setValueNotifyingHost (lock->getValue() > 0.5f ? 0.0f : 1.0f);
+    }
+    else if (kIsFx && followRect.expanded (1).contains (p))
+    {
+        auto* follow = proc.apvts.getParameter ("follow");
+        follow->setValueNotifyingHost (follow->getValue() > 0.5f ? 0.0f : 1.0f);
+    }
     else if (randRect.expanded (1).contains (p))
     {
         randFlashMs = juce::Time::getMillisecondCounterHiRes();
@@ -584,6 +614,13 @@ void UnitView::showMenu()
     m.addSeparator();
     m.addItem (kIsFx ? "Freeze" : "Hold (drone)", true, hold, [this, hold, holdId] { proc.apvts.getParameter (holdId)->setValueNotifyingHost (hold ? 0.0f : 1.0f); });
     m.addItem ("Tempo sync", true, sync, [this, sync] { proc.apvts.getParameter ("sync")->setValueNotifyingHost (sync ? 0.0f : 1.0f); });
+    const bool lock = proc.apvts.getRawParameterValue ("lock")->load() > 0.5f;
+    m.addItem ("Lock pattern", true, lock, [this, lock] { proc.apvts.getParameter ("lock")->setValueNotifyingHost (lock ? 0.0f : 1.0f); });
+    if (kIsFx)
+    {
+        const bool follow = proc.apvts.getRawParameterValue ("follow")->load() > 0.5f;
+        m.addItem ("Follow (bursts on notes)", true, follow, [this, follow] { proc.apvts.getParameter ("follow")->setValueNotifyingHost (follow ? 0.0f : 1.0f); });
+    }
 
     m.showMenuAsync (juce::PopupMenu::Options().withMousePosition());
 }

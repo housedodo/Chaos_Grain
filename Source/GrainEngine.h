@@ -50,6 +50,10 @@ struct GrainParams
     float repeats = 0.0f;      // 0..0.95 feedback of the filtered output into the buffer
     float memorySec = 2.0f;    // how far back grains can reach
     bool  freeze = false;      // stop recording; keep playing the buffer
+    bool  follow = false;      // grains only in bursts triggered by input note onsets
+
+    // Both builds
+    bool  lock = false;        // repeat the current 16-event random pattern
 };
 
 struct TransportInfo
@@ -89,6 +93,11 @@ public:
 
     void publishUiState();
 
+    // Ask for a fresh random pattern (e.g. after RAND), even while LOCK is on. Any thread.
+    void requestNewPattern() { newPatternRequested.store (true); }
+
+    static constexpr int patternLength = 16; // events per random cycle (LOCK repeats one)
+
     // UI helper (message thread): min/max peaks of the recent live buffer, oldest -> newest,
     // covering the same span the grain positions are normalised to.
     void getLivePeaks (std::vector<std::pair<float, float>>& peaks, int columns) const;
@@ -99,6 +108,7 @@ public:
     std::atomic<int> uiNumGrains { 0 };
     std::atomic<int> uiActiveGrains { 0 };
     std::atomic<float> uiPlayhead { 0.0f };
+    std::atomic<int> uiOnsets { 0 };   // increments on every detected input note (FOLLOW)
 
 private:
     struct Grain
@@ -128,14 +138,28 @@ private:
     int pickVoice();
     void killGrainsForVoice (int v);
     float quantizeSemis (float semis, int mode) const;
-    float rand01() { return rng.nextFloat(); }
-    float randBi() { return rng.nextFloat() * 2.0f - 1.0f; }
+    // All musical randomness comes from patternRng, which is re-seeded every
+    // patternLength events. Unlocked: a fresh seed each cycle. Locked: the same seed,
+    // so the cycle repeats exactly. `rng` only generates seeds.
+    float rand01() { return patternRng.nextFloat(); }
+    float randBi() { return patternRng.nextFloat() * 2.0f - 1.0f; }
+    void nextEvent (bool lock, bool boundary);
 
     double sr = 44100.0;
     std::array<Grain, maxGrains> grains;
     std::array<Voice, maxVoices + 1> voices;
     juce::uint32 voiceCounter = 0;
     juce::Random rng;
+    juce::Random patternRng;
+    juce::int64 patternSeed = 1;
+    int eventCount = patternLength; // forces a seed on the first event
+    std::atomic<bool> newPatternRequested { false };
+    bool pendingBoundary = false;
+
+    // FOLLOW: onset detection on the input
+    float envFast = 0.0f, envSlow = 0.0f;
+    int refractory = 0;
+    int followRemaining = 0;
 
     double samplesToNextGrain = 0.0;
     juce::int64 lastStepIndex = -1;

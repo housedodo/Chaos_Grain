@@ -68,6 +68,10 @@ void GrainEngine::reset()
     lastStartNorm = -1.0f;
     fbL = fbR = 0.0f;
     ic1[0] = ic1[1] = ic2[0] = ic2[1] = 0.0f;
+    envFast = envSlow = 0.0f;
+    refractory = followRemaining = 0;
+    eventCount = patternLength;
+    pendingBoundary = false;
 }
 
 void GrainEngine::killAllGrains()
@@ -129,7 +133,24 @@ int GrainEngine::pickVoice()
         if (voices[(size_t) i].active && (voices[(size_t) i].gate || voices[(size_t) i].env > 0.01f))
             candidates[n++] = i;
 
-    return n == 0 ? -1 : candidates[rng.nextInt (n)];
+    return n == 0 ? -1 : candidates[patternRng.nextInt (n)];
+}
+
+void GrainEngine::nextEvent (bool lock, bool boundary)
+{
+    if (newPatternRequested.exchange (false))
+    {
+        patternSeed = rng.nextInt64();
+        boundary = true;
+    }
+    if (boundary)
+    {
+        if (! lock) patternSeed = rng.nextInt64();
+        patternRng.setSeed (patternSeed);
+        eventCount = 0;
+        pendingBoundary = false;
+    }
+    ++eventCount;
 }
 
 float GrainEngine::quantizeSemis (float semis, int mode) const
@@ -178,7 +199,7 @@ void GrainEngine::spawnGrain (const SourceView& src, const GrainParams& p, float
         const float sliceLen = 1.0f / (float) p.slices;
         int slice = juce::jlimit (0, p.slices - 1, (int) (currentBase * (float) p.slices));
         if (rand01() < p.jumble * chaos)
-            slice = rng.nextInt (p.slices);
+            slice = patternRng.nextInt (p.slices);
         startNorm = (float) slice * sliceLen + rand01() * p.spray * chaos * sliceLen;
     }
     else if (live)
@@ -315,6 +336,13 @@ void GrainEngine::render (juce::AudioBuffer<float>& out, int startSample, int nu
     const bool filterOn = fc < (float) (sr * 0.45) - 1.0f || p.reso > 0.15f;
     const float fb = juce::jlimit (0.0f, 0.95f, p.repeats);
 
+    // FOLLOW detector time constants and burst length (>= 150 ms, ~3 grains long)
+    const float followFastRel = std::exp (-1.0f / (0.020f * (float) sr));
+    const float followSlowAtt = 1.0f - std::exp (-1.0f / (0.040f * (float) sr));
+    const float followSlowRel = 1.0f - std::exp (-1.0f / (0.250f * (float) sr));
+    const int followWindow = (int) juce::jmax (0.15 * sr, 3.0 * sizeSamples);
+    if (! p.follow) followRemaining = 0;
+
     float* outL = out.getWritePointer (0);
     float* outR = out.getNumChannels() > 1 ? out.getWritePointer (1) : nullptr;
 
@@ -350,6 +378,26 @@ void GrainEngine::render (juce::AudioBuffer<float>& out, int startSample, int nu
             currentBase = live ? (b > 1.0f ? b - std::floor (b) : b) : wrap01 (b);
         }
 
+        // FOLLOW: detect note onsets on the input; each one opens a burst window
+        if (live && p.follow && inL != nullptr)
+        {
+            const float x = 0.5f * (std::abs (inL[i]) + std::abs (inR != nullptr ? inR[i] : inL[i]));
+            envFast = x > envFast ? x : envFast * followFastRel;
+            envSlow += (x - envSlow) * (x > envSlow ? followSlowAtt : followSlowRel);
+            if (refractory > 0) --refractory;
+            else if (envFast > 0.01f && envFast > envSlow * 1.8f + 0.003f)
+            {
+                refractory = (int) (0.07 * sr);
+                followRemaining = followWindow;
+                samplesToNextGrain = 0.0;      // first grain right on the attack
+                lastStepIndex = -1;
+                pendingBoundary = true;         // each note starts a pattern cycle
+                uiOnsets.fetch_add (1, std::memory_order_relaxed);
+            }
+        }
+        const bool gateOpen = ! (live && p.follow) || followRemaining > 0;
+        if (followRemaining > 0) --followRemaining;
+
         // Scheduler
         if (srcLen > 0)
         {
@@ -362,14 +410,26 @@ void GrainEngine::render (juce::AudioBuffer<float>& out, int startSample, int nu
                 if (step != lastStepIndex)
                 {
                     lastStepIndex = step;
-                    trigger = rand01() >= p.jitter * p.chaos * 0.5f;
+                    if (gateOpen)
+                    {
+                        // Cycles line up with the bar grid so a locked pattern loops in time.
+                        const auto m = step % patternLength;
+                        nextEvent (p.lock, m == 0 || pendingBoundary);
+                        trigger = rand01() >= p.jitter * p.chaos * 0.5f;
+                    }
                 }
+            }
+            else if (! gateOpen)
+            {
+                samplesToNextGrain = 0.0;
+                lastStepIndex = -1;
             }
             else
             {
                 samplesToNextGrain -= 1.0;
                 if (samplesToNextGrain <= 0.0)
                 {
+                    nextEvent (p.lock, eventCount >= patternLength || pendingBoundary);
                     if (p.sync)
                     {
                         samplesToNextGrain += samplesPerStep;
