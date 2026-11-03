@@ -411,16 +411,20 @@ void ChaosGrainProcessor::processFx (juce::AudioBuffer<float>& buffer, const Tra
 
     if (eng == 0)
     {
+        // Resonators follow the notes you play
+        int notes[KeyDetector::maxNotes];
+        const int numNotes = keyDetector.getNotes (notes);
+        if (! freeze) resonator.setNotes (notes, numNotes);
         Resonator::Params rp;
-        rp.shape = shape; rp.chaos = chaos; rp.freeze = freeze; rp.lock = lock;
-        rp.keyRoot = root; rp.minor = minor; rp.stepBeats = stepBeats;
+        rp.shape = shape; rp.chaos = chaos; rp.freeze = freeze; rp.lock = lock; rp.stepBeats = stepBeats;
         resonator.process (dl, dr, wl, wr, n, rp, transport);
-        space = 0.18f + 0.2f * shape;
+        space = 0.15f + 0.15f * shape;
     }
     else if (eng == 1)
     {
         Spectral::Params sp;
         sp.shape = shape; sp.chaos = chaos; sp.freeze = freeze; sp.lock = lock; sp.stepBeats = stepBeats;
+        sp.keyRoot = root; sp.minor = minor; sp.keyValid = keyValid;
         spectral.process (dl, dr, wl, wr, n, sp, transport);
         space = 0.3f;
     }

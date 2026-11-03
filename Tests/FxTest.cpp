@@ -184,35 +184,100 @@ int main (int argc, char** argv)
             if (! extreme) writeWav (outDir.getChildFile ("fx_" + engines[e].toLowerCase() + ".wav"), out);
         }
 
-    // 4. RESONATE: one repeated note (A) comes out as a chord (several pitch classes)
+    // Saw-wave chord (additive, 20 harmonics), sustained for `hold` seconds then silence
+    auto sawChord = [] (const std::vector<float>& freqs, double hold, double total)
     {
-        Rig r (plucks ({ 220.0f }, 0.5, 4.0));
-        r.set ("engine", 0.0f); r.set ("mix", 1.0f); r.set ("shape", 0.0f); r.set ("chaos", 0.3f);
-        auto out = r.run (8.0);
-        const int pcs = countPitchClasses (out, (int) (2.0 * sr));
-        check (pcs >= 3, "resonate: single note -> chord (pitch classes)", (float) pcs);
+        juce::AudioBuffer<float> b (1, (int) (sr * total));
+        b.clear();
+        for (float f : freqs)
+            for (int i = 0; i < (int) (hold * sr); ++i)
+            {
+                const float tt = (float) i / (float) sr;
+                float s = 0.0f;
+                for (int h = 1; h <= 20 && f * (float) h < 12000.0f; ++h) s += std::sin (twoPi * f * (float) h * tt) / (float) h;
+                const float env = juce::jmin (1.0f, tt / 0.01f) * juce::jmin (1.0f, (float) (hold - tt) / 0.02f);
+                b.addSample (0, i, 0.12f * s * env);
+            }
+        return b;
+    };
+    const std::vector<float> cMajor { 130.81f, 164.81f, 196.0f }; // C3 E3 G3
+
+    // 4. RESONATE: tracks the chord, rings in its notes (and only those), BLOOM sustains
+    {
+        Rig r (sawChord (cMajor, 3.0, 3.0));
+        r.set ("engine", 0.0f); r.set ("mix", 1.0f); r.set ("shape", 0.5f); r.set ("chaos", 0.0f);
+        auto out = r.run (2.9);
+        int notes[KeyDetector::maxNotes];
+        const int n = r.proc->keyDetector.getNotes (notes);
+        bool hasC = false, hasE = false, hasG = false;
+        for (int i = 0; i < n; ++i) { hasC |= notes[i] == 48; hasE |= notes[i] == 52; hasG |= notes[i] == 55; }
+        std::printf ("   (tracked notes:");
+        for (int i = 0; i < n; ++i) std::printf (" %d", notes[i]);
+        std::printf (")\n");
+        check (hasC && hasE && hasG && n <= 4, "note tracking: saw C-E-G chord -> C3 E3 G3 (notes found)", (float) n);
+
+        std::array<float, 12> pc {};
+        for (int midi = 40; midi <= 84; ++midi)
+            pc[(size_t) (midi % 12)] += goertzel (out, (int) sr, 440.0f * std::pow (2.0f, (float) (midi - 69) / 12.0f));
+        float in = pc[0] + pc[4] + pc[7], all = 0.0f;
+        for (float v : pc) all += v;
+        check (in / all > 0.8f, "resonate: rings in the played chord (energy share)", in / all);
+    }
+    for (int bloom = 0; bloom < 2; ++bloom)
+    {
+        Rig r (sawChord (cMajor, 1.0, 1.0));
+        r.set ("engine", 0.0f); r.set ("mix", 1.0f); r.set ("chaos", 0.0f); r.set ("shape", bloom ? 0.7f : 0.0f);
+        auto note = r.run (1.0);
+        auto tail = r.run (2.5, true);
+        const float rel = rms (tail, 1.0, 2.0) / juce::jmax (1.0e-6f, rms (note, 0.3, 0.9));
+        if (bloom) check (rel > 0.1f, "resonate: shape 0.7 blooms on (level 1-2 s later vs chord)", rel);
+        else       check (rel < 0.02f, "resonate: shape 0 is a short echo (level later vs chord)", rel);
     }
 
-    // 5. SPECTRAL: passthrough level at low SHAPE, long sustain at SHAPE 0.45
+    // 5. SPECTRAL: clean at shape 0, tunes noise into in-key notes, adds octave/fifth harmonics
     {
         Rig r (music);
         r.set ("engine", 1.0f); r.set ("mix", 1.0f); r.set ("shape", 0.0f); r.set ("chaos", 0.0f);
         juce::AudioBuffer<float> dry;
         auto out = r.run (4.0, false, &dry);
         const float ratio = rms (out, 1.0) / juce::jmax (1.0e-6f, rms (dry, 1.0));
-        check (ratio > 0.5f && ratio < 2.5f, "spectral: shape 0 level vs input (ratio)", ratio);
-
-        for (int sustain = 0; sustain < 2; ++sustain)
+        check (ratio > 0.5f && ratio < 2.0f, "spectral: shape 0 level vs input (ratio)", ratio);
+    }
+    for (int tuned = 0; tuned < 2; ++tuned)
+    {
+        juce::AudioBuffer<float> noiseBuf (1, (int) (sr * 2.0));
+        juce::Random rnd (7);
+        for (int i = 0; i < noiseBuf.getNumSamples(); ++i) noiseBuf.setSample (0, i, (rnd.nextFloat() * 2.0f - 1.0f) * 0.2f);
+        Rig r (noiseBuf);
+        r.set ("engine", 1.0f); r.set ("mix", 1.0f); r.set ("chaos", 0.0f); r.set ("shape", tuned ? 0.5f : 0.0f);
+        auto out = r.run (6.0);
+        // allowed notes of whatever key was detected (chromatic if none)
+        auto& kd = r.proc->keyDetector;
+        const int* sc = kd.isMinor() ? (const int[]) { 0, 2, 3, 5, 7, 8, 10 } : (const int[]) { 0, 2, 4, 5, 7, 9, 11 };
+        float onNotes = 0.0f, between = 0.0f;
+        for (int midi = 60; midi < 84; ++midi)
         {
-            Rig s (plucks ({ 330.0f }, 100.0, 1.0)); // one note, then silence
-            s.set ("engine", 1.0f); s.set ("mix", 1.0f); s.set ("chaos", 0.0f);
-            s.set ("shape", sustain ? 0.45f : 0.0f);
-            auto note = s.run (0.6);
-            auto tail = s.run (2.0, true);
-            const float rel = rms (tail, 1.0, 2.0) / juce::jmax (1.0e-6f, rms (note, 0.1, 0.5));
-            if (sustain) check (rel > 0.1f, "spectral: shape 0.45 sustains (level 1-2 s later vs note)", rel);
-            else         check (rel < 0.01f, "spectral: shape 0 does not sustain (level later vs note)", rel);
+            const int pcRel = ((midi - kd.root()) % 12 + 12) % 12;
+            bool inKey = ! kd.isValid();
+            for (int s = 0; s < 7 && ! inKey; ++s) inKey = sc[s] == pcRel;
+            if (! inKey) continue;
+            onNotes += goertzel (out, (int) (2 * sr), 440.0f * std::pow (2.0f, (float) (midi - 69) / 12.0f));
+            between += goertzel (out, (int) (2 * sr), 440.0f * std::pow (2.0f, ((float) (midi - 69) + 0.5f) / 12.0f));
         }
+        const float ratio = onNotes / juce::jmax (1.0e-9f, between);
+        if (tuned) check (ratio > 2.0f, "spectral: tunes noise into notes (on-note vs between)", ratio);
+        else       check (ratio < 2.0f, "spectral: shape 0 leaves noise untuned (ratio)", ratio);
+    }
+    {
+        juce::AudioBuffer<float> sine (1, (int) sr);
+        for (int i = 0; i < sine.getNumSamples(); ++i) sine.setSample (0, i, 0.3f * std::sin (twoPi * 440.0f * (float) i / (float) sr));
+        Rig r (sine);
+        r.set ("engine", 1.0f); r.set ("mix", 1.0f); r.set ("chaos", 0.0f); r.set ("shape", 1.0f);
+        auto out = r.run (4.0);
+        const int from = (int) sr;
+        const float base = goertzel (out, from, 440.0f);
+        const float down = goertzel (out, from, 220.0f) / base, up = goertzel (out, from, 880.0f) / base, fifth = goertzel (out, from, 660.0f) / base;
+        check (down > 0.05f && up > 0.05f && fifth > 0.03f, "spectral: shape 1 adds octave down/up + fifth (min ratio)", juce::jmin (down, up, fifth));
     }
 
     // 6. PATTERN: creates pitches that were not played

@@ -777,7 +777,8 @@ void UnitView::renderFx (juce::Image& img)
             const float m = proc.resonator.uiMidi[(size_t) v].load (std::memory_order_relaxed);
             const int y0 = scrY + 13 + v * 6;
             const int note = (int) std::lround (m);
-            c.small (juce::String (names[((note % 12) + 12) % 12]) + juce::String (note / 12 - 1), (float) scrX + 2, y0 - 2, col::glow);
+            c.small (m < 0.0f ? juce::String ("--") : juce::String (names[((note % 12) + 12) % 12]) + juce::String (note / 12 - 1),
+                     (float) scrX + 2, y0 - 2, col::glow);
             const float amp = std::min (2.5f, lv * 25.0f);
             const float freq = 0.25f + 0.05f * (float) v;
             for (int x = scrX + 16; x < scrX + scrW - 3; ++x)
@@ -856,8 +857,8 @@ void UnitView::renderFx (juce::Image& img)
             const juce::String pct = juce::String (juce::roundToInt (v * 100.0f)) + "%";
             if (id == "shape")
             {
-                const char* what = eng == 0 ? (v < 0.25f ? "STRINGS" : v < 0.55f ? "BELLS" : v < 0.85f ? "GLASS" : "GONG")
-                                 : eng == 1 ? (v < 0.5f ? (v < 0.15f ? "SMEAR" : "PAD") : "WARP")
+                const char* what = eng == 0 ? (v < 0.3f ? "ECHO" : v < 0.65f ? "SUSTAIN" : "SWELL+SHIMMER")
+                                 : eng == 1 ? (v < 0.5f ? "TUNE" : "HARMONICS")
                                             : (v < 0.6f ? "LENGTH" : "REVERSE+GLIDE");
                 footer = juce::String (what) + " " + pct;
             }

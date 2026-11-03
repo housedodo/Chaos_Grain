@@ -43,14 +43,17 @@ engine is a complex chain inside; the knobs are macros.
 
 | | **RESONATE** | **SPECTRAL** | **PATTERN** |
 |---|---|---|---|
-| Idea | Ghost strings & bells ringing along with you | Freeze, smear and warp the spectrum | Your playing turned into new melodies & rhythms |
-| **SHAPE** | strings -> bells -> glass -> gong | smear -> endless pad -> stretched / shifted metal | note length -> reverse & glide |
-| **CHAOS** | chord changes on the grid, extra strums, 7ths & 9ths | rhythmic spectral freezes, band shuffles, octave shimmer | harmony echoes -> arps -> cascades -> shuffle -> stutter |
+| Idea | Your own notes ring on: resonators tune to the notes you play and are fed by your sound | A harmoniser working on the frequencies of your sound | Your playing turned into new melodies & rhythms |
+| **SHAPE** | BLOOM: short echo -> long sustain -> endless swell + octave shimmer | TUNE (frequencies pulled to the key, resonant peaks) -> HARMONICS (octave down / up, fifth) | note length -> reverse & glide |
+| **CHAOS** | slow detune drift (chorus) + re-plucks of your last notes on the beat | slow, smooth emphasis drifting across the scale; harmonic layers swell in turn | harmony echoes -> arps -> cascades -> shuffle -> stutter |
 | **MIX** | dry / wet | dry / wet | dry / wet |
 
+Play a saw chord into RESONATE and you get exactly that chord back, ringing and blooming; into
+SPECTRAL and it turns into a resonant, in-key chord that grows octaves and a fifth as SHAPE rises.
+
 - **Auto key**: ChaosGrain FX listens to what you play and works out the key (shown on the screen,
-  e.g. `KEY A MIN`). RESONATE tunes its strings to chords of that key and PATTERN keeps every
-  generated note in it. No key knob needed.
+  e.g. `KEY A MIN`) and which notes you are playing (RESONATE shows them on its strings).
+  SPECTRAL tunes to the key and PATTERN keeps every generated note in it. No key knob needed.
 - **Tempo** always follows the DAW (the grid step, 1/16 by default, is in the right-click menu).
 - **Click the screen** (or the red button) to **FREEZE**; **double-click the screen** for a new
   variation.

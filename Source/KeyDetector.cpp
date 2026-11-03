@@ -41,6 +41,7 @@ void KeyDetector::reset()
     mass = 0.0f;
     valid = false;
     framePc = -1;
+    numNotes = numCandidate = candidateFrames = 0;
     currentScore = -1.0f;
     uiRoot.store (-1);
 }
@@ -88,7 +89,8 @@ void KeyDetector::analyse()
         total += m * m;
     }
 
-    if (total < 1.0e-3f) { framePc = -1; return; } // silence: keep the current key
+    if (total < 1.0e-3f) { framePc = -1; return; } // silence: keep the current key and notes
+    trackNotes (total);
 
     int bestPc = 0;
     for (int i = 0; i < 12; ++i)
@@ -117,4 +119,85 @@ void KeyDetector::analyse()
     currentScore = score;
     uiRoot.store (keyRoot);
     uiMinor.store (minor);
+}
+
+void KeyDetector::trackNotes (float total)
+{
+    juce::ignoreUnused (total);
+    // Iterative estimate-and-cancel over MIDI 36..96: a note's salience is the weighted
+    // energy at its first 8 harmonics (looked up within +/-40 cents). The strongest note is
+    // taken, its harmonics are removed from the spectrum, and the search repeats.
+    constexpr int lo = 36, hi = 96, half = size / 2;
+    std::array<float, size / 2 + 1> spec {};
+    std::copy (data.begin(), data.begin() + half + 1, spec.begin());
+
+    const float binHz = (float) sr / (float) size;
+    auto range = [binHz] (float f)
+    {
+        const int a = (int) std::floor (f * 0.977f / binHz), b = (int) std::ceil (f * 1.023f / binHz);
+        const int c = (int) std::lround (f / binHz);
+        return std::pair<int, int> { juce::jmin (a, c), juce::jmax (b, c) };
+    };
+    auto magAt = [&] (float f)
+    {
+        auto [a, b] = range (f);
+        float m = 0.0f;
+        for (int k = juce::jmax (1, a); k <= juce::jmin (half - 1, b); ++k) m = juce::jmax (m, spec[(size_t) k]);
+        return m;
+    };
+    auto salience = [&] (int m)
+    {
+        const float f0 = 440.0f * std::pow (2.0f, (float) (m - 69) / 12.0f);
+        float s = 0.0f, maxPartial = 0.0f;
+        for (int h = 1; h <= 8; ++h)
+        {
+            const float f = f0 * (float) h;
+            if (f > 6000.0f) break;
+            const float mg = magAt (f);
+            s += mg / std::sqrt ((float) h);
+            maxPartial = juce::jmax (maxPartial, mg);
+        }
+        if (magAt (f0) < 0.25f * maxPartial) s *= 0.3f; // no real fundamental: likely a ghost
+        return s;
+    };
+
+    std::array<int, maxNotes> found {};
+    int count = 0;
+    float first = 0.0f;
+    for (int it = 0; it < maxNotes; ++it)
+    {
+        int arg = -1; float best = 0.0f;
+        for (int m = lo; m <= hi; ++m)
+        {
+            bool taken = false;
+            for (int j = 0; j < count; ++j) taken |= found[(size_t) j] == m;
+            if (taken) continue;
+            const float s = salience (m);
+            if (s > best) { best = s; arg = m; }
+        }
+        if (arg < 0) break;
+        if (it == 0) first = best;
+        else if (best < 0.3f * first) break;
+        found[(size_t) count++] = arg;
+
+        // cancel this note's harmonics
+        const float f0 = 440.0f * std::pow (2.0f, (float) (arg - 69) / 12.0f);
+        for (int h = 1; h <= 8; ++h)
+        {
+            auto [a, b] = range (f0 * (float) h);
+            for (int k = juce::jmax (1, a); k <= juce::jmin (half - 1, b); ++k) spec[(size_t) k] = 0.0f;
+        }
+    }
+    if (count == 0) return;
+    std::sort (found.begin(), found.begin() + count);
+
+    // Debounce: a new set of notes must be seen in two consecutive frames.
+    const bool same = count == numCandidate && std::equal (found.begin(), found.begin() + count, candidate.begin());
+    candidate = found; numCandidate = count;
+    candidateFrames = same ? candidateFrames + 1 : 0;
+    if (candidateFrames >= 1)
+    {
+        notes = found;
+        numNotes = count;
+    }
 }

@@ -20,6 +20,11 @@ public:
     bool isMinor() const   { return minor; }
     int currentPitchClass() const { return framePc; } // -1 if silent
 
+    // Polyphonic note tracking: the notes (MIDI numbers, sorted) currently being played,
+    // estimated with a harmonic sieve. Held while the sound sustains.
+    static constexpr int maxNotes = 6;
+    int getNotes (int* out) const { for (int i = 0; i < numNotes; ++i) out[i] = notes[(size_t) i]; return numNotes; }
+
     // For tests: analyse a mono buffer offline and return (root, minor).
     static std::pair<int, bool> estimate (const float* chroma12);
 
@@ -28,6 +33,7 @@ public:
 
 private:
     void analyse();
+    void trackNotes (float total);
 
     static constexpr int order = 12, size = 1 << order, hop = size / 2;
     juce::dsp::FFT fft { order };
@@ -42,4 +48,7 @@ private:
     int keyRoot = 0, framePc = -1;
     bool minor = false, valid = false;
     float currentScore = -1.0f;
+
+    std::array<int, maxNotes> notes {}, candidate {};
+    int numNotes = 0, numCandidate = 0, candidateFrames = 0;
 };
