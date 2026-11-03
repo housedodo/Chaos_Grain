@@ -66,8 +66,9 @@ The bright blocks on the screen are the grains currently playing; the dotted lin
 ## Getting a build
 
 ### Easiest: GitHub Actions
-Push this folder to a GitHub repo. The workflow in `.github/workflows/build.yml` builds
-Windows, macOS (universal) and Linux versions. Download them from the run's **Artifacts**.
+Every push builds the Windows version (VST3 + standalone `.exe`) via `.github/workflows/build.yml`.
+Download it from the run's **Artifacts** section. macOS and Linux builds can be re-enabled by
+uncommenting them in the workflow's build matrix.
 
 ### Build it yourself
 Requires CMake 3.22+ and a C++17 compiler (Visual Studio 2022 on Windows, Xcode on macOS).

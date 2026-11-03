@@ -11,8 +11,9 @@ jobs:
       matrix:
         include:
           - { os: windows-latest, name: Windows }
-          - { os: macos-latest,   name: macOS }
-          - { os: ubuntu-22.04,   name: Linux }
+          # Add these back when other platforms are needed:
+          # - { os: macos-latest,   name: macOS }
+          # - { os: ubuntu-22.04,   name: Linux }
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
