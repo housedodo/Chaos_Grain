@@ -1,0 +1,74 @@
+# ChaosGrain
+
+A granular "chaos" sampler instrument (VST3 / AU / Standalone). Load a sample and it chops,
+scatters, re-pitches, reverses and re-orders it into pads, glitches, stutters and chops.
+
+## Using it
+
+1. Put it on an instrument/MIDI track in your DAW.
+2. Drag an audio file onto the waveform (or click **LOAD SAMPLE**).
+3. Play MIDI notes (C3 / note 60 = original pitch), or switch on **Hold** to drone without MIDI.
+4. Pick a **Preset** or hit **RANDOMIZE** until something cool happens.
+
+The dots on the waveform are the grains currently playing; the white line is the play position.
+
+### Controls
+
+| Section | Knob | What it does |
+|---|---|---|
+| Grain | **Position** | Where in the sample grains start |
+| | **Scan** | Moves the position through the sample (1x = normal speed, negative = backwards, 0 = frozen) |
+| | **Spray** | Random offset around the position |
+| | **Size** | Grain length (5 ms – 2 s). Short = textures, long = chops/pads |
+| | **Density** | Grains per second |
+| | **Jitter** | Timing randomness (in sync mode: chance to skip a step) |
+| | **Shape** | 0 = hard-edged chop, 100 = smooth bell |
+| Pitch / Order | **Pitch** | Transpose |
+| | **Pitch Chaos** | Random pitch per grain (±semitones) |
+| | **Quantize** | Snap the random pitch to semitones, octaves or 5ths+octaves |
+| | **Reverse** | Chance a grain plays backwards |
+| | **Slices** | Cuts the sample into N equal chops; grains start on slice boundaries |
+| | **Jumble** | Chance a grain jumps to a random slice (shuffles the order) |
+| | **Repeat** | Chance a grain repeats the last one (stutter) |
+| Motion / Output | **Spread** | Random stereo panning |
+| | **Sync Rate** | Grid used when **Tempo Sync** is on (follows the DAW tempo) |
+| | **Attack / Release** | Note envelope |
+| | **CHAOS** | Macro that scales every random amount at once (0 = tidy, 200% = madness) |
+| | **Gain** | Output level |
+
+### Recipes
+
+- **Pads:** Size 400–1000 ms, Density 20–40, Shape 100%, Spray ~25%, slow Attack/Release. Play chords.
+- **Chops:** Tempo Sync on, Rate 1/16, Slices 8–16, Jumble 50–100%, Shape low, Size ≈ one step.
+- **Glitch:** Short Size (20–60 ms), high Pitch Chaos with Semitones quantize, Repeat + Reverse up.
+- **Freeze:** Scan 0, Spray low, long Size, Density high – the sound freezes at Position.
+
+## Getting a build
+
+### Easiest: GitHub Actions
+Push this folder to a GitHub repo. The workflow in `.github/workflows/build.yml` builds
+Windows, macOS (universal) and Linux versions. Download them from the run's **Artifacts**.
+
+### Build it yourself
+Requires CMake 3.22+ and a C++17 compiler (Visual Studio 2022 on Windows, Xcode on macOS).
+JUCE is downloaded automatically.
+
+```bash
+cmake -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build --config Release
+```
+
+The plugin ends up in `build/ChaosGrain_artefacts/Release/`.
+
+### Installing
+- **Windows:** copy `ChaosGrain.vst3` to `C:\Program Files\Common Files\VST3\`
+- **macOS:** copy `ChaosGrain.vst3` to `~/Library/Audio/Plug-Ins/VST3/` and `ChaosGrain.component`
+  to `~/Library/Audio/Plug-Ins/Components/`. Unsigned builds downloaded from the internet may need
+  `xattr -cr ~/Library/Audio/Plug-Ins/VST3/ChaosGrain.vst3` before your DAW will load them.
+- **Linux:** copy `ChaosGrain.vst3` to `~/.vst3/`
+
+Then rescan plugins in your DAW.
+
+## Notes
+- The sample's file path is saved with your project, not the audio itself; if you move the file, reload it.
+- Samples are normalised on load and limited to 10 minutes.
