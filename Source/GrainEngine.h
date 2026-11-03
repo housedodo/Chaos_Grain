@@ -77,6 +77,7 @@ public:
     std::array<std::atomic<float>, maxUiGrains> uiGrainPos {};
     std::array<std::atomic<float>, maxUiGrains> uiGrainLevel {};
     std::atomic<int> uiNumGrains { 0 };
+    std::atomic<int> uiActiveGrains { 0 };
     std::atomic<float> uiPlayhead { 0.0f };
 
 private:

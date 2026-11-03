@@ -1,0 +1,536 @@
+#include "UnitView.h"
+#include "RetroGfx.h"
+
+namespace
+{
+    namespace col
+    {
+        const juce::Colour casing  { 0xffa3a197 };
+        const juce::Colour caseHi  { 0xffc4c2b7 };
+        const juce::Colour caseLo  { 0xff77756c };
+        const juce::Colour caseDk  { 0xff4c4b45 };
+        const juce::Colour panel   { 0xff93918a };
+        const juce::Colour label   { 0xff2f2f2b };
+        const juce::Colour red     { 0xffcf2a3a };
+        const juce::Colour blue    { 0xff2d3b8f };
+        const juce::Colour knob    { 0xffd9d7cd };
+        const juce::Colour scrA    { 0xff0f5249 };
+        const juce::Colour scrB    { 0xff082824 };
+        const juce::Colour grid    { 0xff1e7466 };
+        const juce::Colour streak  { 0xff2a8d7d };
+        const juce::Colour phos    { 0xffc8fff2 };
+        const juce::Colour glow    { 0xff4fd8bf };
+        const juce::Colour seg     { 0xffb8ff3a };
+        const juce::Colour segOff  { 0xff1f3a12 };
+        const juce::Colour segBg   { 0xff0c160a };
+        const juce::Colour led     { 0xff7dff4f };
+        const juce::Colour ledOff  { 0xff2b4a22 };
+        const juce::Colour black   { 0xff151513 };
+    }
+
+    juce::Colour shade (juce::Colour c, float f)
+    {
+        auto ch = [f] (juce::uint8 v) { return (juce::uint8) juce::jlimit (0, 255, (int) ((float) v * f)); };
+        return retro::to15bit (juce::Colour (ch (c.getRed()), ch (c.getGreen()), ch (c.getBlue())));
+    }
+
+    float bayer (int x, int y) { return retro::bayer4 (x, y); }
+
+    // Pixel-exact drawing onto a low-res image.
+    struct Canvas
+    {
+        explicit Canvas (juce::Image& i) : bd (i, juce::Image::BitmapData::readWrite), W (i.getWidth()), H (i.getHeight()) {}
+
+        juce::Image::BitmapData bd;
+        int W, H;
+
+        void px (int x, int y, juce::Colour c) { if (x >= 0 && y >= 0 && x < W && y < H) bd.setPixelColour (x, y, c); }
+        void px (float x, float y, juce::Colour c) { px ((int) std::floor (x), (int) std::floor (y), c); }
+
+        void rect (int x, int y, int w, int h, juce::Colour c)
+        {
+            for (int j = y; j < y + h; ++j)
+                for (int i = x; i < x + w; ++i) px (i, j, c);
+        }
+
+        void poly (const std::vector<juce::Point<float>>& p, juce::Colour c)
+        {
+            float x0 = 1e9f, y0 = 1e9f, x1 = -1e9f, y1 = -1e9f;
+            for (auto& q : p) { x0 = std::min (x0, q.x); x1 = std::max (x1, q.x); y0 = std::min (y0, q.y); y1 = std::max (y1, q.y); }
+            for (int Y = (int) std::floor (y0); Y <= (int) std::ceil (y1); ++Y)
+                for (int X = (int) std::floor (x0); X <= (int) std::ceil (x1); ++X)
+                {
+                    const float tx = (float) X + 0.5f, ty = (float) Y + 0.5f;
+                    bool inside = false;
+                    for (size_t i = 0, j = p.size() - 1; i < p.size(); j = i++)
+                        if ((p[i].y > ty) != (p[j].y > ty) && tx < (p[j].x - p[i].x) * (ty - p[i].y) / (p[j].y - p[i].y) + p[i].x)
+                            inside = ! inside;
+                    if (inside) px (X, Y, c);
+                }
+        }
+
+        void chamfer (float X, float Y, float w, float h, float c, juce::Colour colour)
+        {
+            poly ({ { X + c, Y }, { X + w - c, Y }, { X + w, Y + c }, { X + w, Y + h - c },
+                    { X + w - c, Y + h }, { X + c, Y + h }, { X, Y + h - c }, { X, Y + c } }, colour);
+        }
+
+        void bevel (float X, float Y, float w, float h, juce::Colour face, float c = 2, bool raised = true, float edge = 1)
+        {
+            const auto hi = raised ? shade (face, 1.25f) : shade (face, 0.55f);
+            const auto lo = raised ? shade (face, 0.6f) : shade (face, 1.2f);
+            const float c1 = std::max (0.0f, c - 1);
+            chamfer (X, Y, w, h, c, col::black);
+            chamfer (X + 1, Y + 1, w - 2, h - 2, c1, lo);
+            chamfer (X + 1, Y + 1, w - 2 - edge, h - 2 - edge, c1, hi);
+            chamfer (X + 1 + edge, Y + 1 + edge, w - 2 - 2 * edge, h - 2 - 2 * edge, c1, retro::to15bit (face));
+        }
+
+        void line (float fx0, float fy0, float fx1, float fy1, juce::Colour c)
+        {
+            int x0 = (int) fx0, y0 = (int) fy0, x1 = (int) fx1, y1 = (int) fy1;
+            const int dx = std::abs (x1 - x0), dy = -std::abs (y1 - y0), sx = x0 < x1 ? 1 : -1, sy = y0 < y1 ? 1 : -1;
+            int e = dx + dy;
+            for (;;)
+            {
+                px (x0, y0, c);
+                if (x0 == x1 && y0 == y1) break;
+                const int e2 = 2 * e;
+                if (e2 >= dy) { e += dy; x0 += sx; }
+                if (e2 <= dx) { e += dx; y0 += sy; }
+            }
+        }
+
+        void text (juce::String s, float X, int Y, juce::Colour c, bool centre = false)
+        {
+            s = s.toUpperCase();
+            if (centre) X -= (float) (s.length() * 6 - 1) / 2.0f;
+            const int x0 = (int) X;
+            for (int i = 0; i < s.length(); ++i)
+                if (auto* g = retro::glyph5x7 (s[i]))
+                    for (int r = 0; r < 7; ++r)
+                        for (int b = 0; b < 5; ++b)
+                            if (g[r] & (0x10 >> b)) px (x0 + i * 6 + b, Y + r, c);
+        }
+
+        void small (juce::String s, float X, int Y, juce::Colour c, bool centre = false)
+        {
+            static const std::pair<char, std::array<juce::uint8, 5>> f3[] = {
+                { '0', { 7,5,5,5,7 } }, { '1', { 2,6,2,2,7 } }, { '2', { 7,1,7,4,7 } }, { '3', { 7,1,3,1,7 } }, { '4', { 5,5,7,1,1 } },
+                { '5', { 7,4,7,1,7 } }, { '6', { 7,4,7,5,7 } }, { '7', { 7,1,1,2,2 } }, { '8', { 7,5,7,5,7 } }, { '9', { 7,5,7,1,7 } },
+                { '.', { 0,0,0,0,2 } }, { '-', { 0,0,7,0,0 } }, { '+', { 0,2,7,2,0 } }, { '%', { 5,1,2,4,5 } }, { '/', { 1,1,2,4,4 } },
+                { 'A', { 2,5,7,5,5 } }, { 'B', { 6,5,6,5,6 } }, { 'C', { 3,4,4,4,3 } }, { 'D', { 6,5,5,5,6 } }, { 'E', { 7,4,6,4,7 } },
+                { 'F', { 7,4,6,4,4 } }, { 'G', { 3,4,5,5,3 } }, { 'H', { 5,5,7,5,5 } }, { 'I', { 7,2,2,2,7 } }, { 'J', { 1,1,1,5,2 } },
+                { 'K', { 5,5,6,5,5 } }, { 'L', { 4,4,4,4,7 } }, { 'M', { 5,7,7,5,5 } }, { 'N', { 6,5,5,5,5 } }, { 'O', { 2,5,5,5,2 } },
+                { 'P', { 6,5,6,4,4 } }, { 'Q', { 2,5,5,6,3 } }, { 'R', { 6,5,6,5,5 } }, { 'S', { 3,4,2,1,6 } }, { 'T', { 7,2,2,2,2 } },
+                { 'U', { 5,5,5,5,7 } }, { 'V', { 5,5,5,5,2 } }, { 'W', { 5,5,7,7,5 } }, { 'X', { 5,5,2,5,5 } }, { 'Y', { 5,5,2,2,2 } },
+                { 'Z', { 7,1,2,4,7 } }, { ' ', { 0,0,0,0,0 } },
+            };
+            s = s.toUpperCase();
+            if (centre) X -= (float) (s.length() * 4 - 1) / 2.0f;
+            const int x0 = (int) X;
+            for (int i = 0; i < s.length(); ++i)
+                for (auto& g : f3)
+                    if ((juce::juce_wchar) g.first == s[i])
+                    {
+                        for (int r = 0; r < 5; ++r)
+                            for (int b = 0; b < 3; ++b)
+                                if (g.second[(size_t) r] & (4 >> b)) px (x0 + i * 4 + b, Y + r, c);
+                        break;
+                    }
+        }
+    };
+
+    std::vector<juce::Point<float>> ngon (float cx, float cy, float r, int n, float rot)
+    {
+        std::vector<juce::Point<float>> p;
+        for (int i = 0; i < n; ++i)
+        {
+            const float a = rot + (float) i * juce::MathConstants<float>::twoPi / (float) n;
+            p.push_back ({ cx + std::cos (a) * r, cy + std::sin (a) * r });
+        }
+        return p;
+    }
+
+    void drawKnob (Canvas& c, float cx, float cy, float r, juce::Colour cap, float value)
+    {
+        const float a0 = juce::degreesToRadians (-225.0f), a1 = juce::degreesToRadians (45.0f);
+        const float ang = a0 + value * (a1 - a0);
+
+        for (int i = 0; i <= 10; ++i)
+        {
+            const float a = a0 + (float) i / 10.0f * (a1 - a0), rr = r + 3;
+            c.px (cx + std::cos (a) * rr, cy + std::sin (a) * rr, col::label);
+            if (i % 5 == 0) c.px (cx + std::cos (a) * (rr + 1), cy + std::sin (a) * (rr + 1), col::label);
+        }
+
+        c.poly (ngon (cx + 2, cy + 2, r, 14, 0), shade (col::caseDk, 0.8f));
+        const float light = -2.3f;
+        const auto sk = ngon (cx, cy, r, 14, ang);
+        for (int i = 0; i < 14; ++i)
+        {
+            const float mid = ang + ((float) i + 0.5f) * juce::MathConstants<float>::twoPi / 14.0f;
+            const float f = 0.72f + 0.3f * std::cos (mid - light) + (i % 2 ? 0.06f : -0.06f);
+            c.poly ({ { cx, cy }, sk[(size_t) i], sk[(size_t) ((i + 1) % 14)] }, shade (col::knob, f));
+        }
+        c.poly (ngon (cx, cy, r * 0.74f, 14, ang), shade (col::knob, 0.86f));
+
+        const float capRot = ang + juce::MathConstants<float>::pi / 8.0f;
+        const auto cp = ngon (cx, cy, r * 0.52f, 8, capRot);
+        for (int i = 0; i < 8; ++i)
+        {
+            const float mid = capRot + ((float) i + 0.5f) * juce::MathConstants<float>::pi / 4.0f;
+            c.poly ({ { cx, cy }, cp[(size_t) i], cp[(size_t) ((i + 1) % 8)] }, shade (cap, 0.75f + 0.35f * std::cos (mid - light)));
+        }
+
+        c.line (cx + std::cos (ang) * r * 0.55f, cy + std::sin (ang) * r * 0.55f,
+                cx + std::cos (ang) * (r - 1), cy + std::sin (ang) * (r - 1), juce::Colours::white);
+    }
+
+    void drawLed (Canvas& c, int X, int Y, bool on)
+    {
+        c.rect (X - 1, Y - 1, 5, 4, col::black);
+        c.rect (X, Y, 3, 2, on ? col::led : col::ledOff);
+        if (on) c.px (X, Y, juce::Colour (0xffe6ffd0));
+    }
+
+    void sevenSeg (Canvas& c, int X, int Y, const juce::String& str, int digits)
+    {
+        static const std::map<juce::juce_wchar, const char*> seg = {
+            { '0', "abcdef" }, { '1', "bc" }, { '2', "abged" }, { '3', "abgcd" }, { '4', "fgbc" }, { '5', "afgcd" },
+            { '6', "afgedc" }, { '7', "abc" }, { '8', "abcdefg" }, { '9', "abcfgd" }, { '-', "g" }, { ' ', "" } };
+
+        struct D { juce::juce_wchar ch; bool dp; bool off; };
+        std::vector<D> ds;
+        for (auto ch : str)
+        {
+            if (ch == '.') { if (! ds.empty()) ds.back().dp = true; }
+            else ds.push_back ({ ch, false, false });
+        }
+        while ((int) ds.size() > digits) ds.erase (ds.begin());
+        while ((int) ds.size() < digits) ds.insert (ds.begin(), { '8', false, true });
+
+        const int w = 5, h = 9;
+        for (size_t i = 0; i < ds.size(); ++i)
+        {
+            const int ox = X + (int) i * (w + 3);
+            const juce::String on = ds[i].off ? "" : (seg.count (ds[i].ch) ? seg.at (ds[i].ch) : "");
+            auto s = [&] (char k, int x, int y, int ww, int hh) { c.rect (x, y, ww, hh, on.containsChar (k) ? col::seg : col::segOff); };
+            s ('a', ox + 1, Y, w - 2, 1);         s ('b', ox + w - 1, Y + 1, 1, 3);
+            s ('c', ox + w - 1, Y + 5, 1, 3);     s ('d', ox + 1, Y + h - 1, w - 2, 1);
+            s ('e', ox, Y + 5, 1, 3);             s ('f', ox, Y + 1, 1, 3);
+            s ('g', ox + 1, Y + 4, w - 2, 1);
+            c.rect (ox + w + 1, Y + h - 1, 1, 1, ds[i].dp ? col::seg : col::segOff);
+        }
+    }
+
+    // Screen geometry (low-res)
+    constexpr int crtX = 6, crtY = 22, crtW = 116, crtH = 66;
+    constexpr int scrX = crtX + 5, scrY = crtY + 5, scrW = crtW - 10, scrH = crtH - 10;
+    const juce::Rectangle<int> powerRect { 8, 7, 12, 8 };
+}
+
+const UnitView::KnobSpec UnitView::knobSpecs[3] = {
+    { "size",  "SIZE",  24.0f, 132.0f, 9.0f,  false },
+    { "chaos", "CHAOS", 64.0f, 133.0f, 15.0f, true  },
+    { "pitch", "PITCH", 104.0f, 132.0f, 9.0f, false },
+};
+
+//==============================================================================
+UnitView::UnitView (ChaosGrainProcessor& p) : proc (p)
+{
+    for (int i = 0; i < 3; ++i)
+    {
+        auto& s = sliders[i];
+        s.setSliderStyle (juce::Slider::RotaryHorizontalVerticalDrag);
+        s.setTextBoxStyle (juce::Slider::NoTextBox, false, 0, 0);
+        s.setLookAndFeel (&invisible);
+        s.setMouseDragSensitivity (180);
+        s.setPopupMenuEnabled (false);
+        s.onValueChange = [this, i] { touched = i; touchedTime = juce::Time::getMillisecondCounterHiRes(); };
+        addAndMakeVisible (s);
+        attachments[i] = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (proc.apvts, knobSpecs[i].paramId, s);
+
+        if (auto* param = proc.apvts.getParameter (knobSpecs[i].paramId))
+            s.setDoubleClickReturnValue (true, param->convertFrom0to1 (param->getDefaultValue()));
+    }
+    touched = -1;
+
+    setSize (lowW * scale, lowH * scale);
+    startTimerHz (30);
+}
+
+UnitView::~UnitView()
+{
+    stopTimer();
+    for (auto& s : sliders) s.setLookAndFeel (nullptr);
+}
+
+void UnitView::resized()
+{
+    for (int i = 0; i < 3; ++i)
+    {
+        const auto& k = knobSpecs[i];
+        const int r = (int) k.r + 3;
+        sliders[i].setBounds (((int) k.cx - r) * scale, ((int) k.cy - r) * scale, r * 2 * scale, r * 2 * scale);
+    }
+    refreshPeaks();
+}
+
+void UnitView::timerCallback()
+{
+    if (proc.getSampleVersion() != lastSampleVersion)
+    {
+        lastSampleVersion = proc.getSampleVersion();
+        refreshPeaks();
+    }
+    repaint();
+}
+
+void UnitView::refreshPeaks()
+{
+    peaks.clear();
+    auto s = proc.getCurrentSample();
+    if (s == nullptr) return;
+
+    const auto& buf = s->buffer;
+    const int cols = scrW - 6, n = buf.getNumSamples();
+    peaks.resize ((size_t) cols);
+    for (int c = 0; c < cols; ++c)
+    {
+        const int a = (int) ((juce::int64) n * c / cols);
+        const int b = juce::jmax (a + 1, (int) ((juce::int64) n * (c + 1) / cols));
+        float lo = 0.0f, hi = 0.0f;
+        for (int ch = 0; ch < buf.getNumChannels(); ++ch)
+        {
+            auto range = juce::FloatVectorOperations::findMinAndMax (buf.getReadPointer (ch, a), b - a);
+            lo = juce::jmin (lo, range.getStart());
+            hi = juce::jmax (hi, range.getEnd());
+        }
+        peaks[(size_t) c] = { lo, hi };
+    }
+}
+
+void UnitView::render (juce::Image& img)
+{
+    Canvas c (img);
+    const double nowMs = juce::Time::getMillisecondCounterHiRes();
+    const bool hold = proc.apvts.getRawParameterValue ("hold")->load() > 0.5f;
+    const int active = proc.engine.uiActiveGrains.load (std::memory_order_relaxed);
+
+    // --- Casing ---
+    c.bevel (0, 0, (float) lowW, (float) lowH, col::casing, 5, true, 2);
+    for (int j = 4; j < lowH - 4; ++j)
+        for (int i = 4; i < lowW - 4; ++i)
+            if ((float) j / (float) lowH > 0.55f + bayer (i, j) * 0.6f) c.px (i, j, shade (col::casing, 0.94f));
+
+    // --- Power (= HOLD) + activity LED ---
+    c.bevel ((float) powerRect.getX(), (float) powerRect.getY(), 12, 8, col::caseLo, 1, false);
+    c.bevel ((float) powerRect.getX() + 2, (float) powerRect.getY() + (hold ? 3 : 2), 8, 4,
+             hold ? shade (col::red, 1.25f) : col::red, 0, ! hold);
+    drawLed (c, 24, 10, active > 0 && (active > 2 || std::fmod (nowMs, 200.0) < 120.0));
+    c.small ("HOLD", 14, 17, col::label, true);
+
+    c.text ("CHAOS", 96, 6, col::label, true);
+    c.small ("GRAIN UNIT", 96, 14, col::caseDk, true);
+
+    // --- CRT ---
+    c.bevel (crtX, crtY, crtW, crtH, juce::Colour (0xff8b8a82), 4, false, 2);
+    c.chamfer (scrX - 1, scrY - 1, scrW + 2, scrH + 2, 4, col::black);
+    for (int j = 0; j < scrH; ++j)
+        for (int i = 0; i < scrW; ++i)
+        {
+            const bool cut = (i < 3 - j) || (i < 3 - (scrH - 1 - j)) || (scrW - 1 - i < 3 - j) || (scrW - 1 - i < 3 - (scrH - 1 - j));
+            if (cut) continue;
+            const float dx = ((float) i - scrW / 2.0f) / (scrW / 2.0f), dy = ((float) j - scrH / 2.0f) / (scrH / 2.0f);
+            const float d = std::min (1.0f, std::sqrt (dx * dx * 0.6f + dy * dy * 0.6f));
+            c.px (scrX + i, scrY + j, d > bayer (i, j) * 0.6f + 0.45f ? col::scrB : col::scrA);
+        }
+    for (int k = 1; k < 8; ++k)
+        for (int j = 2; j < scrH - 2; j += 2) c.px (scrX + (int) std::round ((float) k * scrW / 8.0f), scrY + j, col::grid);
+    for (int k = 1; k < 6; ++k)
+        for (int i = 2; i < scrW - 2; i += 2) c.px (scrX + i, scrY + (int) std::round ((float) k * scrH / 6.0f), col::grid);
+
+    // slice markers
+    const int slices = (int) proc.apvts.getRawParameterValue ("slices")->load();
+    if (slices > 1 && ! peaks.empty())
+        for (int s = 1; s < slices; ++s)
+        {
+            const int xx = scrX + 3 + (int) peaks.size() * s / slices;
+            for (int j = 3; j < scrH - 3; j += 3) c.px (xx, scrY + j, col::glow);
+        }
+
+    for (int j = 0; j < scrH; ++j)
+    {
+        const int i = (int) ((float) scrW * 0.72f - (float) j * 0.35f);
+        if ((i + j) % 2 == 0 && i > 2 && i < scrW - 2) c.px (scrX + i, scrY + j, col::streak);
+    }
+
+    const int mid = scrY + scrH / 2;
+    const float amp = (float) scrH * 0.40f;
+
+    if (peaks.empty())
+    {
+        if (std::fmod (nowMs, 1200.0) < 800.0)
+            c.text ("INSERT", scrX + scrW / 2.0f, mid - 10, col::phos, true);
+        c.small ("CLICK OR DROP FILE", scrX + scrW / 2.0f, mid + 3, col::glow, true);
+    }
+    else
+    {
+        // Phosphor trace: glow fill between peaks + bright outline
+        int prevTop = 0, prevBot = 0;
+        for (size_t k = 0; k < peaks.size(); ++k)
+        {
+            const int xx = scrX + 3 + (int) k;
+            const int top = mid - (int) std::round (peaks[k].second * amp);
+            const int bot = mid - (int) std::round (peaks[k].first * amp);
+            for (int y = top + 1; y < bot; ++y)
+                if ((xx + y) % 2 == 0) c.px (xx, y, col::grid.brighter (0.3f));
+            if (k > 0)
+            {
+                for (int y = std::min (prevTop, top); y <= std::max (prevTop, top); ++y) c.px (xx, y, col::phos);
+                for (int y = std::min (prevBot, bot); y <= std::max (prevBot, bot); ++y) c.px (xx, y, col::phos);
+            }
+            prevTop = top; prevBot = bot;
+        }
+
+        // Playhead
+        const float ph = proc.engine.uiPlayhead.load (std::memory_order_relaxed);
+        const int phx = scrX + 3 + (int) (ph * (float) peaks.size());
+        for (int j = 2; j < scrH - 2; j += 2) c.px (phx, scrY + j, col::seg);
+
+        // Grains: bright glowing blocks
+        const int n = proc.engine.uiNumGrains.load (std::memory_order_relaxed);
+        for (int i = 0; i < n; ++i)
+        {
+            const float gp = proc.engine.uiGrainPos[(size_t) i].load (std::memory_order_relaxed);
+            const float lv = proc.engine.uiGrainLevel[(size_t) i].load (std::memory_order_relaxed);
+            if (lv < 0.05f) continue;
+            const int gx = scrX + 3 + (int) (gp * (float) peaks.size());
+            const int gy = mid + (int) (std::sin ((float) i * 2.39996f) * amp * 0.8f);
+            const int s = lv > 0.6f ? 2 : 1;
+            c.rect (gx - 1, gy - 1, s + 2, s + 2, col::glow);
+            c.rect (gx, gy, s, s, col::phos);
+        }
+    }
+
+    if (dragging)
+    {
+        c.rect (scrX, scrY, scrW, 1, col::seg); c.rect (scrX, scrY + scrH - 1, scrW, 1, col::seg);
+        c.rect (scrX, scrY, 1, scrH, col::seg); c.rect (scrX + scrW - 1, scrY, 1, scrH, col::seg);
+    }
+
+    // --- Readout: grain count, or the value of the knob being turned ---
+    juce::String readout = juce::String (juce::jmin (active, 99999)) + ".";
+    juce::String caption = "GRAINS";
+    if (touched >= 0 && nowMs - touchedTime < 1500.0)
+    {
+        const float v = (float) sliders[touched].getValue();
+        if (touched == 0) { caption = v >= 1000.0f ? "SIZE S" : "SIZE MS"; readout = v >= 1000.0f ? juce::String (v / 1000.0f, 2) : juce::String (juce::roundToInt (v)); }
+        if (touched == 1) { caption = "CHAOS %"; readout = juce::String (juce::roundToInt (v * 100.0f)); }
+        if (touched == 2) { caption = "PITCH ST"; readout = juce::String (v, 1); }
+    }
+    c.small (caption, 33, 92, col::label, true);
+    c.bevel (8, 98, 50, 12, col::caseLo, 1, false);
+    c.rect (10, 100, 46, 8, col::segBg);
+    sevenSeg (c, 58 - 4 - 5 * 8, 99, readout, 5);
+
+    // --- Density LEDs ---
+    c.bevel (62, 92, 58, 18, col::panel, 2, false);
+    const bool sync = proc.apvts.getRawParameterValue ("sync")->load() > 0.5f;
+    const float dens = sync ? proc.apvts.getParameter ("rate")->getValue() : proc.apvts.getParameter ("density")->getValue();
+    const int lit = juce::jlimit (1, 6, (int) std::ceil (dens * 6.0f));
+    for (int i = 0; i < 6; ++i) drawLed (c, 68 + i * 8, 97, i < lit);
+    c.small (sync ? "SYNC RATE" : "DENSITY", 91, 104, col::label, true);
+
+    // --- Knobs ---
+    c.bevel (6, 114, 116, 50, col::panel, 3, false);
+    for (int i = 0; i < 3; ++i)
+    {
+        const auto& k = knobSpecs[i];
+        const float v = (float) sliders[i].valueToProportionOfLength (sliders[i].getValue());
+        drawKnob (c, k.cx, k.cy, k.r, k.red ? col::red : col::blue, v);
+        c.text (k.label, k.cx, (int) (k.cy + k.r + (k.red ? 5 : 6)), col::label, true);
+    }
+
+    // Screws
+    for (auto pt : { juce::Point<int> (3, 3), { lowW - 4, 3 }, { 3, lowH - 4 }, { lowW - 4, lowH - 4 } })
+    {
+        c.rect (pt.x - 1, pt.y - 1, 3, 3, col::caseDk);
+        c.rect (pt.x - 1, pt.y, 3, 1, col::caseHi);
+    }
+}
+
+void UnitView::paint (juce::Graphics& g)
+{
+    g.fillAll (juce::Colour (0xff1b1b1f));
+    juce::Image img (juce::Image::ARGB, lowW, lowH, true);
+    render (img);
+    retro::blitLowRes (g, img, 0, 0, scale);
+}
+
+void UnitView::mouseDown (const juce::MouseEvent& e)
+{
+    if (e.mods.isPopupMenu()) { showMenu(); return; }
+
+    const auto p = e.getPosition() / scale;
+    if (powerRect.expanded (1).contains (p))
+    {
+        auto* hold = proc.apvts.getParameter ("hold");
+        hold->setValueNotifyingHost (hold->getValue() > 0.5f ? 0.0f : 1.0f);
+    }
+    else if (juce::Rectangle<int> (crtX, crtY, crtW, crtH).contains (p))
+    {
+        loadViaChooser();
+    }
+}
+
+void UnitView::loadViaChooser()
+{
+    chooser = std::make_unique<juce::FileChooser> ("Choose a sample", juce::File(), proc.formatManager.getWildcardForAllFormats());
+    chooser->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
+                          [this] (const juce::FileChooser& fc)
+                          {
+                              if (fc.getResult().existsAsFile())
+                                  proc.loadSample (fc.getResult());
+                          });
+}
+
+void UnitView::showMenu()
+{
+    juce::PopupMenu presets;
+    const auto names = ChaosGrainProcessor::getPresetNames();
+    for (int i = 0; i < names.size(); ++i)
+        presets.addItem (names[i], [this, i] { proc.applyPreset (i); });
+
+    const bool sync = proc.apvts.getRawParameterValue ("sync")->load() > 0.5f;
+    const bool hold = proc.apvts.getRawParameterValue ("hold")->load() > 0.5f;
+
+    juce::PopupMenu m;
+    m.addItem ("Load sample...", [this] { loadViaChooser(); });
+    m.addSubMenu ("Presets", presets);
+    m.addItem ("Randomize", [this] { proc.randomize(); });
+    m.addSeparator();
+    m.addItem ("Hold (drone)", true, hold, [this, hold] { proc.apvts.getParameter ("hold")->setValueNotifyingHost (hold ? 0.0f : 1.0f); });
+    m.addItem ("Tempo sync", true, sync, [this, sync] { proc.apvts.getParameter ("sync")->setValueNotifyingHost (sync ? 0.0f : 1.0f); });
+    m.addSeparator();
+    m.addItem ("Advanced controls...", [this] { if (onShowAdvanced) onShowAdvanced(); });
+
+    m.showMenuAsync (juce::PopupMenu::Options().withMousePosition());
+}
+
+bool UnitView::isInterestedInFileDrag (const juce::StringArray& files)
+{
+    for (auto& f : files)
+        if (juce::File (f).hasFileExtension ("wav;aif;aiff;flac;ogg;mp3"))
+            return true;
+    return false;
+}
+
+void UnitView::filesDropped (const juce::StringArray& files, int, int)
+{
+    dragging = false;
+    for (auto& f : files)
+        if (proc.loadSample (juce::File (f)))
+            break;
+}

@@ -317,9 +317,10 @@ void GrainEngine::render (juce::AudioBuffer<float>& out, int startSample, int nu
 
 void GrainEngine::publishUiState()
 {
-    int n = 0;
+    int n = 0, total = 0;
     for (auto& g : grains)
     {
+        if (g.active) ++total;
         if (! g.active || n >= maxUiGrains) continue;
         uiGrainPos[(size_t) n].store (lastSrcLen > 0 ? (float) (g.pos / lastSrcLen) : 0.0f, std::memory_order_relaxed);
         uiGrainLevel[(size_t) n].store (window ((float) g.age / (float) g.length, g.fade)
@@ -327,5 +328,6 @@ void GrainEngine::publishUiState()
         ++n;
     }
     uiNumGrains.store (n, std::memory_order_relaxed);
+    uiActiveGrains.store (total, std::memory_order_relaxed);
     uiPlayhead.store (currentBase, std::memory_order_relaxed);
 }

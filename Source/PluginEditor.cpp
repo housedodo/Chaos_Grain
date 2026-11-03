@@ -393,13 +393,15 @@ void WaveformView::filesDropped (const juce::StringArray& files, int, int)
 }
 
 //==============================================================================
-ChaosGrainEditor::ChaosGrainEditor (ChaosGrainProcessor& p)
-    : AudioProcessorEditor (&p), proc (p), waveform (p)
+FullPanel::FullPanel (ChaosGrainProcessor& p)
+    : proc (p), waveform (p)
 {
     setLookAndFeel (&lnf);
     tooltips.setLookAndFeel (&lnf);
 
-    for (auto* c : std::initializer_list<juce::Component*> { &logo, &waveform, &loadButton, &randomButton,
+    backButton.setTooltip ("Back to the compact unit");
+    backButton.onClick = [this] { if (onBack) onBack(); };
+    for (auto* c : std::initializer_list<juce::Component*> { &backButton, &logo, &waveform, &loadButton, &randomButton,
                                                              &presetBox, &holdButton, &syncButton })
         addAndMakeVisible (c);
     logo.setInterceptsMouseClicks (false, false);
@@ -457,20 +459,18 @@ ChaosGrainEditor::ChaosGrainEditor (ChaosGrainProcessor& p)
                 &addKnob ("chaos", "CHAOS", "Macro: scales every random amount").slider,
                 &addKnob ("gain", "Gain", "Output level").slider };
 
-    setResizable (true, true);
-    setResizeLimits (780, 600, 1600, 1150);
     setSize (930, 690);
     startTimerHz (30);
 }
 
-ChaosGrainEditor::~ChaosGrainEditor()
+FullPanel::~FullPanel()
 {
     stopTimer();
     tooltips.setLookAndFeel (nullptr);
     setLookAndFeel (nullptr);
 }
 
-ChaosGrainEditor::Knob& ChaosGrainEditor::addKnob (const juce::String& id, const juce::String& name, const juce::String& tip)
+FullPanel::Knob& FullPanel::addKnob (const juce::String& id, const juce::String& name, const juce::String& tip)
 {
     auto k = std::make_unique<Knob>();
     k->slider.setName (id);
@@ -484,7 +484,7 @@ ChaosGrainEditor::Knob& ChaosGrainEditor::addKnob (const juce::String& id, const
     return *knobs.back();
 }
 
-ChaosGrainEditor::Choice& ChaosGrainEditor::addChoice (const juce::String& id, const juce::String& name, const juce::StringArray& items)
+FullPanel::Choice& FullPanel::addChoice (const juce::String& id, const juce::String& name, const juce::StringArray& items)
 {
     auto c = std::make_unique<Choice>();
     c->box.addItemList (items, 1);
@@ -496,7 +496,7 @@ ChaosGrainEditor::Choice& ChaosGrainEditor::addChoice (const juce::String& id, c
     return *choices.back();
 }
 
-void ChaosGrainEditor::rebuildBackground()
+void FullPanel::rebuildBackground()
 {
     const int W = getWidth() / px + 1, H = getHeight() / px + 1;
     background = juce::Image (juce::Image::RGB, W, H, false);
@@ -507,12 +507,11 @@ void ChaosGrainEditor::rebuildBackground()
         bevelBox (ig, toLow (r), pal::panel, true);
 }
 
-void ChaosGrainEditor::paint (juce::Graphics& g)
+void FullPanel::paint (juce::Graphics& g)
 {
     if (background.isValid())
         blitLowRes (g, background, 0, 0, px);
 
-    pixelText (g, "CHAOS GRAIN", titleArea, pal::magenta, juce::Justification::centredLeft, 4);
 
     const char* titles[] = { "GRAIN", "PITCH / ORDER", "MOTION / OUTPUT" };
     for (int i = 0; i < 3; ++i)
@@ -520,7 +519,7 @@ void ChaosGrainEditor::paint (juce::Graphics& g)
                    juce::Justification::topLeft, 2);
 }
 
-void ChaosGrainEditor::paintOverChildren (juce::Graphics& g)
+void FullPanel::paintOverChildren (juce::Graphics& g)
 {
     // CRT scanlines
     g.setColour (juce::Colours::black.withAlpha (0.16f));
@@ -528,14 +527,15 @@ void ChaosGrainEditor::paintOverChildren (juce::Graphics& g)
         g.fillRect (0, y, getWidth(), 1);
 }
 
-void ChaosGrainEditor::resized()
+void FullPanel::resized()
 {
     auto area = getLocalBounds().reduced (15, 12);
 
     auto top = area.removeFromTop (48);
     logo.setBounds (top.removeFromLeft (48));
-    top.removeFromLeft (6);
-    titleArea = top.removeFromLeft (270);
+    top.removeFromLeft (8);
+    backButton.setBounds (top.removeFromLeft (110).withSizeKeepingCentre (110, 36));
+    titleArea = {};
 
     auto buttons = top.withSizeKeepingCentre (top.getWidth(), 36);
     randomButton.setBounds (buttons.removeFromRight (138));
@@ -546,6 +546,7 @@ void ChaosGrainEditor::resized()
     buttons.removeFromRight (12);
     syncButton.setBounds (buttons.removeFromRight (92));
     holdButton.setBounds (buttons.removeFromRight (96));
+
 
     area.removeFromTop (9);
     waveform.setBounds (area.removeFromTop (juce::jmax (120, area.getHeight() / 4)));
@@ -572,7 +573,7 @@ void ChaosGrainEditor::resized()
     rebuildBackground();
 }
 
-void ChaosGrainEditor::timerCallback()
+void FullPanel::timerCallback()
 {
     if (proc.getSampleVersion() != lastSampleVersion)
     {
@@ -581,4 +582,36 @@ void ChaosGrainEditor::timerCallback()
     }
     waveform.repaint();
     logo.repaint();
+}
+
+//==============================================================================
+ChaosGrainEditor::ChaosGrainEditor (ChaosGrainProcessor& p)
+    : AudioProcessorEditor (&p), proc (p), unit (p), full (p)
+{
+    setLookAndFeel (&lnf);
+    addChildComponent (unit);
+    addChildComponent (full);
+    unit.onShowAdvanced = [this] { setAdvanced (true); };
+    full.onBack = [this] { setAdvanced (false); };
+    setAdvanced ((bool) proc.apvts.state.getProperty ("advancedUI", false));
+}
+
+ChaosGrainEditor::~ChaosGrainEditor()
+{
+    setLookAndFeel (nullptr);
+}
+
+void ChaosGrainEditor::setAdvanced (bool advanced)
+{
+    proc.apvts.state.setProperty ("advancedUI", advanced, nullptr);
+    unit.setVisible (! advanced);
+    full.setVisible (advanced);
+    if (advanced) setSize (930, 690);
+    else          setSize (UnitView::lowW * UnitView::scale, UnitView::lowH * UnitView::scale);
+}
+
+void ChaosGrainEditor::resized()
+{
+    unit.setBounds (getLocalBounds());
+    full.setBounds (getLocalBounds());
 }

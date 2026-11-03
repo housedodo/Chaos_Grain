@@ -2,6 +2,7 @@
 
 #include <juce_audio_utils/juce_audio_utils.h>
 #include "PluginProcessor.h"
+#include "UnitView.h"
 
 // Low-poly / PS1-style look: everything is rendered at low resolution and
 // scaled up with nearest-neighbour filtering.
@@ -56,12 +57,15 @@ private:
     bool dragging = false;
 };
 
-class ChaosGrainEditor : public juce::AudioProcessorEditor,
-                         private juce::Timer
+// Full "advanced" panel with every parameter.
+class FullPanel : public juce::Component,
+                  private juce::Timer
 {
 public:
-    explicit ChaosGrainEditor (ChaosGrainProcessor&);
-    ~ChaosGrainEditor() override;
+    explicit FullPanel (ChaosGrainProcessor&);
+    ~FullPanel() override;
+
+    std::function<void()> onBack;
 
     void paint (juce::Graphics&) override;
     void paintOverChildren (juce::Graphics&) override;
@@ -93,7 +97,7 @@ private:
 
     GemLogo logo;
     WaveformView waveform;
-    juce::TextButton loadButton { "LOAD" }, randomButton { "RANDOMIZE" };
+    juce::TextButton loadButton { "LOAD" }, randomButton { "RANDOMIZE" }, backButton { "< UNIT" };
     juce::ComboBox presetBox;
     juce::ToggleButton holdButton { "HOLD" }, syncButton { "SYNC" };
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> holdAttach, syncAttach;
@@ -107,6 +111,26 @@ private:
 
     std::unique_ptr<juce::FileChooser> chooser;
     int lastSampleVersion = -1;
+
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (FullPanel)
+};
+
+// Plugin window: the compact unit by default, the full panel on request.
+class ChaosGrainEditor : public juce::AudioProcessorEditor
+{
+public:
+    explicit ChaosGrainEditor (ChaosGrainProcessor&);
+    ~ChaosGrainEditor() override;
+
+    void resized() override;
+
+private:
+    void setAdvanced (bool);
+
+    ChaosGrainProcessor& proc;
+    RetroLookAndFeel lnf;
+    UnitView unit;
+    FullPanel full;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (ChaosGrainEditor)
 };

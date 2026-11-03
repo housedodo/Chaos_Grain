@@ -32,7 +32,8 @@ juce_add_plugin(ChaosGrain
 target_sources(ChaosGrain PRIVATE
     Source/GrainEngine.cpp
     Source/PluginProcessor.cpp
-    Source/PluginEditor.cpp)
+    Source/PluginEditor.cpp
+    Source/UnitView.cpp)
 
 target_compile_definitions(ChaosGrain PUBLIC
     JUCE_WEB_BROWSER=0

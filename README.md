@@ -5,18 +5,32 @@ scatters, re-pitches, reverses and re-orders it into pads, glitches, stutters an
 
 ![ChaosGrain](docs/screenshot.png)
 
-The UI is drawn in a low-poly, late-90s console style: everything renders at low resolution with
-15-bit colour and dithering, knobs are flat-shaded 3D meshes with vertex snapping, and every
-playing grain shows up as a spinning cube.
+The plugin opens as a compact pixel-art "grain unit" with three knobs:
+
+- **SIZE**: grain length (short = glitch/texture, long = chops/pads)
+- **CHAOS**: one knob that scales all the randomness
+- **PITCH**: transpose
+
+The red button is **HOLD** (drones the sample without MIDI), the LED flickers while grains play,
+the green display counts active grains (and shows a knob's value while you turn it), and the
+LED row shows density. **Click the screen or drop a file on it** to load a sample.
+**Double-click** a knob to reset it.
+
+**Right-click anywhere** for presets, randomize, tempo sync and **Advanced controls**, which opens
+the full panel with every parameter:
+
+![Advanced panel](docs/advanced.png)
 
 ## Using it
 
 1. Put it on an instrument/MIDI track in your DAW.
-2. Drag an audio file onto the waveform (or click **LOAD SAMPLE**).
-3. Play MIDI notes (C3 / note 60 = original pitch), or switch on **Hold** to drone without MIDI.
-4. Pick a **Preset** or hit **RANDOMIZE** until something cool happens.
+2. Drop an audio file on the screen (or click the screen).
+3. Play MIDI notes (C3 / note 60 = original pitch), or press the red **HOLD** button to drone without MIDI.
+4. Right-click for presets or **Randomize** until something cool happens.
 
-The dots on the waveform are the grains currently playing; the white line is the play position.
+The bright blocks on the screen are the grains currently playing; the dotted line is the play position.
+
+### All controls (Advanced panel)
 
 ### Controls
 
