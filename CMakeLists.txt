@@ -100,4 +100,11 @@ if(CHAOSGRAIN_TESTS)
     target_include_directories(FxTest PRIVATE $<TARGET_PROPERTY:ChaosGrainFX,INCLUDE_DIRECTORIES>)
     target_compile_definitions(FxTest PRIVATE $<TARGET_PROPERTY:ChaosGrainFX,COMPILE_DEFINITIONS>)
     target_link_libraries(FxTest PRIVATE ChaosGrainFX)
+
+    # Records a captioned demo video of ChaosGrain FX (Linux; needs ffmpeg + a display).
+    juce_add_console_app(DemoFx)
+    target_sources(DemoFx PRIVATE Tests/DemoFx.cpp)
+    target_include_directories(DemoFx PRIVATE $<TARGET_PROPERTY:ChaosGrainFX,INCLUDE_DIRECTORIES>)
+    target_compile_definitions(DemoFx PRIVATE $<TARGET_PROPERTY:ChaosGrainFX,COMPILE_DEFINITIONS>)
+    target_link_libraries(DemoFx PRIVATE ChaosGrainFX)
 endif()

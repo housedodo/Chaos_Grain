@@ -805,6 +805,7 @@ void UnitView::renderFx (juce::Image& img)
     else
     {
         // PATTERN: live waveform + grains
+        proc.engine.getLivePeaks (peaks, scrW - 6);
         const int mid = scrY + scrH / 2;
         float pk = 0.05f;
         for (auto& pr : peaks) pk = std::max (pk, std::max (-pr.first, pr.second));
