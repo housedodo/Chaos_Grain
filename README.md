@@ -13,6 +13,18 @@ Everything lives on one compact pixel-art "grain unit":
   **FILTER · SPACE · REPEAT · MEMORY** (FX).
 - **Small buttons** at the top: the red **HOLD** (instrument: drone without MIDI) or **FREEZE**
   (FX), **SYNC** (lock grains to the DAW tempo; lights up when on) and **RAND** (randomize).
+- **Second row of small knobs** (both):
+  - **CHAR**: the sound's character. *Clean*; *Tape* (wow & flutter on all grains, soft
+    saturation, gentle high cut: lo-fi, hip-hop); *Crystal* (about half the grains an octave or two
+    up, softer edges, bigger brighter reverb: ambient, cinematic); *Dust* (12 kHz / 7-bit, vinyl
+    crackle while grains play: lo-fi, trap).
+  - **KEY**: Off / Major / Minor / Penta / Blues. Every grain's pitch (random pitch, PITCH knob and
+    played notes) snaps into the scale, measured from the sample's original pitch (FX: from what
+    you play), so CHAOS stays in tune.
+  - **SWING**: with SYNC on, every second step comes late (100% = half a step); works with the
+    DAW grid and the internal clock.
+  - RAND leaves CHAR, KEY and SWING alone; some presets set a character.
+- **Large / Small UI** in the right-click menu (remembered per project).
 - **LOCK** (both): the randomness repeats as a loop. Random choices run in cycles of 16 grain
   events; LOCK keeps repeating the cycle you are hearing (with SYNC on: exactly 16 steps of the
   tempo grid, e.g. one bar at 1/16). RAND rolls a new pattern, which then repeats.
@@ -38,6 +50,7 @@ set by the presets and RAND, and every one of them can be automated from your DA
 | Small knobs | FILTER · RESO · SPACE | FILTER · SPACE · REPEAT · MEMORY |
 | Red button | HOLD (drone without MIDI) | FREEZE (stop recording, keep playing the buffer) |
 | Mode buttons | LOCK | LOCK · FOLLOW |
+| Second row | CHAR · KEY · SWING | CHAR · KEY · SWING |
 
 - **Mix** (FX): dry/wet (equal-power). Gain only affects the wet signal, so 0% is a clean bypass.
 - **Repeat** (FX): feedback. The filtered grain output is fed back into the buffer, so

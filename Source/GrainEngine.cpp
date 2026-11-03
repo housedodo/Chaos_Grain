@@ -69,6 +69,10 @@ void GrainEngine::reset()
     fbL = fbR = 0.0f;
     ic1[0] = ic1[1] = ic2[0] = ic2[1] = 0.0f;
     envFast = envSlow = 0.0f;
+    wowPhase = flutterPhase = 0.0;
+    tapeLp[0] = tapeLp[1] = 0.0f;
+    holdL = holdR = holdCount = wetEnv = crackle = 0.0f;
+    swingOdd = false;
     refractory = followRemaining = 0;
     eventCount = patternLength;
     pendingBoundary = false;
@@ -134,6 +138,41 @@ int GrainEngine::pickVoice()
             candidates[n++] = i;
 
     return n == 0 ? -1 : candidates[patternRng.nextInt (n)];
+}
+
+float GrainEngine::snapToScale (float semis, int scale)
+{
+    static const std::array<std::vector<int>, 5> scales = { {
+        {},                          // off
+        { 0, 2, 4, 5, 7, 9, 11 },    // major
+        { 0, 2, 3, 5, 7, 8, 10 },    // natural minor
+        { 0, 2, 4, 7, 9 },           // major pentatonic
+        { 0, 3, 5, 6, 7, 10 },       // blues
+    } };
+    if (scale <= 0 || scale >= (int) scales.size()) return semis;
+
+    const auto& deg = scales[(size_t) scale];
+    const int s = (int) std::round (semis);
+    int best = s, bestDist = 99;
+    for (int d = -6; d <= 6; ++d)
+    {
+        const int cand = s + d;
+        const int pc = ((cand % 12) + 12) % 12;
+        if (std::find (deg.begin(), deg.end(), pc) != deg.end() && std::abs (d) < bestDist)
+        {
+            bestDist = std::abs (d);
+            best = cand;
+        }
+    }
+    return (float) best;
+}
+
+juce::int64 GrainEngine::swungStepIndex (double stepPos, float swing)
+{
+    const double sw = 0.5 * juce::jlimit (0.0, 1.0, (double) swing);
+    const auto pair = (juce::int64) std::floor (stepPos / 2.0);
+    const double within = stepPos - (double) pair * 2.0;   // 0..2
+    return pair * 2 + (within >= 1.0 + sw ? 1 : 0);
 }
 
 void GrainEngine::nextEvent (bool lock, bool boundary)
@@ -216,8 +255,15 @@ void GrainEngine::spawnGrain (const SourceView& src, const GrainParams& p, float
     lastStartNorm = startNorm;
 
     // --- Pitch ---
-    const float randomSemis = quantizeSemis (randBi() * p.pitchRand * chaos, p.pitchQuant);
-    const float semis = p.pitch + (float) (voice.note - 60) + randomSemis;
+    float randomSemis = quantizeSemis (randBi() * p.pitchRand * chaos, p.pitchQuant);
+    if (p.character == 2) // Crystal: octave-up shimmer layers
+    {
+        const float r = rand01();
+        if (r < 0.15f)      randomSemis += 24.0f;
+        else if (r < 0.55f) randomSemis += 12.0f;
+    }
+    float semis = p.pitch + (float) (voice.note - 60) + randomSemis;
+    if (p.scale > 0) semis = snapToScale (semis, p.scale);
     const double ratio = std::pow (2.0, semis / 12.0) * (src.rate / sr);
 
     // --- Length, direction ---
@@ -248,7 +294,8 @@ void GrainEngine::spawnGrain (const SourceView& src, const GrainParams& p, float
     g->increment = reversed ? -ratio : ratio;
     g->length = lengthOut;
     g->age = 0;
-    g->fade = juce::jlimit (0.0f, 0.5f, juce::jmax (p.shape * 0.5f, 48.0f / (float) lengthOut));
+    const float shape = p.character == 2 ? juce::jmax (p.shape, 0.75f) : p.shape; // Crystal: soft edges
+    g->fade = juce::jlimit (0.0f, 0.5f, juce::jmax (shape * 0.5f, 48.0f / (float) lengthOut));
     g->voice = vIndex;
 
     const float pan = juce::jlimit (0.0f, 1.0f, 0.5f + randBi() * 0.5f * juce::jmin (1.0f, p.panSpread * chaos));
@@ -336,6 +383,12 @@ void GrainEngine::render (juce::AudioBuffer<float>& out, int startSample, int nu
     const bool filterOn = fc < (float) (sr * 0.45) - 1.0f || p.reso > 0.15f;
     const float fb = juce::jlimit (0.0f, 0.95f, p.repeats);
 
+    // CHARACTER constants
+    const float tapeA = 1.0f - std::exp (-juce::MathConstants<float>::twoPi * 8000.0f / (float) sr);
+    const float dustHold = (float) (sr / 12000.0);
+    const float envRel = std::exp (-1.0f / (0.3f * (float) sr));
+    const float crackleChance = (float) (7.0 / sr); // ~7 crackles per second at full level
+
     // FOLLOW detector time constants and burst length (>= 150 ms, ~3 grains long)
     const float followFastRel = std::exp (-1.0f / (0.020f * (float) sr));
     const float followSlowAtt = 1.0f - std::exp (-1.0f / (0.040f * (float) sr));
@@ -406,7 +459,7 @@ void GrainEngine::render (juce::AudioBuffer<float>& out, int startSample, int nu
             if (p.sync && t.isPlaying)
             {
                 const double ppq = t.ppqAtBlockStart + (blockOffset + i) * ppqPerSample;
-                const auto step = (juce::int64) std::floor (ppq / p.stepBeats + 1.0e-9);
+                const auto step = swungStepIndex (ppq / p.stepBeats + 1.0e-9, p.swing);
                 if (step != lastStepIndex)
                 {
                     lastStepIndex = step;
@@ -432,7 +485,10 @@ void GrainEngine::render (juce::AudioBuffer<float>& out, int startSample, int nu
                     nextEvent (p.lock, eventCount >= patternLength || pendingBoundary);
                     if (p.sync)
                     {
-                        samplesToNextGrain += samplesPerStep;
+                        // Swing: long-short pairs (even step longer, odd step shorter)
+                        const double sw = 0.5 * juce::jlimit (0.0, 1.0, (double) p.swing);
+                        samplesToNextGrain += samplesPerStep * (swingOdd ? 1.0 - sw : 1.0 + sw);
+                        swingOdd = ! swingOdd;
                         trigger = rand01() >= p.jitter * p.chaos * 0.5f;
                     }
                     else
@@ -447,6 +503,16 @@ void GrainEngine::render (juce::AudioBuffer<float>& out, int startSample, int nu
             }
 
             if (trigger) spawnGrain (src, p, gainComp);
+        }
+
+        // Tape: whole "tape speed" wobbles (slow wow + fast flutter)
+        double speedMod = 1.0;
+        if (p.character == 1)
+        {
+            wowPhase += 0.55 / sr;     wowPhase -= std::floor (wowPhase);
+            flutterPhase += 6.5 / sr;  flutterPhase -= std::floor (flutterPhase);
+            speedMod = 1.0 + 0.0055 * std::sin (juce::MathConstants<double>::twoPi * wowPhase)
+                           + 0.0012 * std::sin (juce::MathConstants<double>::twoPi * flutterPhase);
         }
 
         // Sum grains
@@ -464,13 +530,36 @@ void GrainEngine::render (juce::AudioBuffer<float>& out, int startSample, int nu
                 l += sL * w * g.gainL;
                 r += sR * w * g.gainR;
 
-                g.pos += g.increment;
+                g.pos += g.increment * speedMod;
                 if (g.pos >= srcLen) g.pos -= srcLen;
                 else if (g.pos < 0.0) g.pos += srcLen;
 
                 if (++g.age >= g.length || ! voices[(size_t) g.voice].active)
                     g.active = false;
             }
+        }
+
+        // CHARACTER colouring of the grain signal
+        if (p.character == 1) // Tape: soft saturation + gentle high cut (~8 kHz)
+        {
+            l = std::tanh (1.6f * l) / 1.6f;
+            r = std::tanh (1.6f * r) / 1.6f;
+            tapeLp[0] += tapeA * (l - tapeLp[0]); l = tapeLp[0];
+            tapeLp[1] += tapeA * (r - tapeLp[1]); r = tapeLp[1];
+        }
+        else if (p.character == 3) // Dust: ~12 kHz sample rate, 7-bit, crackle while sounding
+        {
+            holdCount += 1.0f;
+            if (holdCount >= dustHold) { holdCount -= dustHold; holdL = l; holdR = r; }
+            l = std::round (holdL * 64.0f) / 64.0f;
+            r = std::round (holdR * 64.0f) / 64.0f;
+
+            const float a = std::max (std::abs (l), std::abs (r));
+            wetEnv = a > wetEnv ? a : wetEnv * envRel;
+            if (rng.nextFloat() < crackleChance)
+                crackle = (rng.nextFloat() * 2.0f - 1.0f) * 0.12f * std::min (1.0f, wetEnv * 8.0f);
+            l += crackle; r += crackle * 0.8f;
+            crackle *= 0.55f;
         }
 
         // Resonant low-pass (TPT SVF)

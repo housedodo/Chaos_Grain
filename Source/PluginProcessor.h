@@ -53,6 +53,8 @@ public:
     GrainEngine engine;
 
     static juce::StringArray rateNames() { return { "1/1", "1/2", "1/4", "1/8", "1/16", "1/32", "1/8T", "1/16T" }; }
+    static juce::StringArray characterNames() { return { "Clean", "Tape", "Crystal", "Dust" }; }
+    static juce::StringArray scaleNames() { return { "Off", "Major", "Minor", "Penta", "Blues" }; }
     static juce::StringArray quantNames() { return { "Free", "Semis", "Octaves", "5th+Oct" }; }
 
 private:

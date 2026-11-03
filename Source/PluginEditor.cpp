@@ -218,7 +218,8 @@ ChaosGrainEditor::ChaosGrainEditor (ChaosGrainProcessor& p)
 {
     setLookAndFeel (&lnf);
     addAndMakeVisible (unit);
-    setSize (UnitView::lowW * UnitView::scale, UnitView::lowH * UnitView::scale);
+    unit.onScaleChanged = [this] { setSize (unit.getWidth(), unit.getHeight()); };
+    setSize (unit.getWidth(), unit.getHeight());
 }
 
 ChaosGrainEditor::~ChaosGrainEditor()

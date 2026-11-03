@@ -90,6 +90,9 @@ APVTS::ParameterLayout ChaosGrainProcessor::createLayout()
     layout.add (pct ("reso", "Resonance", 0.1f));
     layout.add (pct ("space", "Space", 0.2f));
     layout.add (std::make_unique<AudioParameterBool> (ParameterID { "lock", 1 }, "Lock Pattern", false));
+    layout.add (std::make_unique<AudioParameterChoice> (ParameterID { "character", 1 }, "Character", characterNames(), 0));
+    layout.add (std::make_unique<AudioParameterChoice> (ParameterID { "scale", 1 }, "Key", scaleNames(), 0));
+    layout.add (pct ("swing", "Swing", 0.0f));
 
     // Live input (FX build)
     if (kIsFx)
@@ -163,6 +166,9 @@ GrainParams ChaosGrainProcessor::readParams() const
     p.freeze     = get ("freeze") > 0.5f;
     p.follow     = get ("follow") > 0.5f;
     p.lock       = get ("lock") > 0.5f;
+    p.character  = (int) get ("character");
+    p.scale      = (int) get ("scale");
+    p.swing      = get ("swing");
     return p;
 }
 
@@ -232,9 +238,10 @@ void ChaosGrainProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::
     engine.publishUiState();
 
     // Space: reverb on the wet signal
-    const float space = apvts.getRawParameterValue ("space")->load();
+    const bool crystal = (int) apvts.getRawParameterValue ("character")->load() == 2;
+    const float space = juce::jmin (1.0f, apvts.getRawParameterValue ("space")->load() + (crystal ? 0.25f : 0.0f));
     juce::Reverb::Parameters rp;
-    rp.roomSize = 0.55f + 0.44f * space;
+    rp.roomSize = juce::jmin (0.99f, 0.55f + 0.44f * space + (crystal ? 0.08f : 0.0f));
     rp.damping = 0.35f;
     rp.width = 1.0f;
     rp.wetLevel = 0.22f * space;          // juce::Reverb scales wet x3
@@ -402,6 +409,11 @@ void ChaosGrainProcessor::applyPreset (int index)
     setParam ("space", presetSpace[index]);
     setParam ("filter", presetFilter[index]);
     setParam ("reso", index == 4 ? 0.35f : 0.1f);
+
+    //                                     Init Pad Shim Chop Tape Glit Rev Oct
+    static const int presetCharacter[] = { 0,   0,  2,   0,   1,   3,   1,  2 };
+    setParam ("character", (float) presetCharacter[index]);
+    setParam ("swing", index == 3 ? 0.35f : 0.0f);
 }
 
 void ChaosGrainProcessor::getStateInformation (juce::MemoryBlock& destData)

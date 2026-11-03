@@ -242,7 +242,7 @@ namespace
                  on ? litColour : juce::Colour (0xffcfcdc3), 0, ! on);
     }
 
-    constexpr float miniY = 176.0f, miniR = 5.0f;
+    constexpr float miniY = 176.0f, miniY2 = 202.0f, miniR = 5.0f;
 }
 
 std::vector<UnitView::KnobSpec> UnitView::makeKnobSpecs()
@@ -261,6 +261,14 @@ std::vector<UnitView::KnobSpec> UnitView::makeKnobSpecs()
     {
         const float cx = 6.0f + 116.0f * ((float) i + 0.5f) / (float) minis.size();
         k.push_back ({ minis[i].first, minis[i].second, std::round (cx), miniY, miniR, false, true });
+    }
+
+    // Second row: sound character, key lock, swing
+    const std::pair<const char*, const char*> row2[] = { { "character", "CHAR" }, { "scale", "KEY" }, { "swing", "SWING" } };
+    for (int i = 0; i < 3; ++i)
+    {
+        const float cx = 6.0f + 116.0f * ((float) i + 0.5f) / 3.0f;
+        k.push_back ({ row2[i].first, row2[i].second, std::round (cx), miniY2, miniR, false, true });
     }
     return k;
 }
@@ -285,6 +293,12 @@ UnitView::UnitView (ChaosGrainProcessor& p) : proc (p)
             s.setDoubleClickReturnValue (true, param->convertFrom0to1 (param->getDefaultValue()));
     }
     touched = -1;
+
+    // UI size: remembered per project; default depends on the screen height.
+    const auto saved = proc.apvts.state.getProperty ("uiScale");
+    if (! saved.isVoid()) scale = juce::jlimit (3, 4, (int) saved);
+    else if (auto* d = juce::Desktop::getInstance().getDisplays().getPrimaryDisplay())
+        scale = d->userArea.getHeight() >= lowH * 4 + 120 ? 4 : 3;
 
     setSize (lowW * scale, lowH * scale);
     startTimerHz (30);
@@ -483,6 +497,9 @@ void UnitView::render (juce::Image& img)
         if (id == "space")   { caption = "SPACE %";   readout = pct(); }
         if (id == "repeats") { caption = "REPEATS %"; readout = pct(); }
         if (id == "memory")  { caption = "MEMORY S";  readout = juce::String (v, 2); }
+        if (id == "character") { caption = "CHAR " + ChaosGrainProcessor::characterNames()[juce::roundToInt (v)].toUpperCase(); readout = juce::String (juce::roundToInt (v) + 1); }
+        if (id == "scale")   { caption = "KEY " + ChaosGrainProcessor::scaleNames()[juce::roundToInt (v)].toUpperCase(); readout = juce::roundToInt (v) == 0 ? "-" : juce::String (juce::roundToInt (v)); }
+        if (id == "swing")   { caption = "SWING %";   readout = pct(); }
     }
     c.small (caption, 33, 92, col::label, true);
     c.bevel (8, 98, 50, 12, col::caseLo, 1, false);
@@ -516,15 +533,22 @@ void UnitView::render (juce::Image& img)
 
     // --- Knobs ---
     c.bevel (6, 114, 116, 50, col::panel, 3, false);
-    c.bevel (6, 166, 116, 28, col::panel, 2, false);
+    c.bevel (6, 166, 116, 52, col::panel, 2, false);
+    c.rect (9, 192, 110, 1, shade (col::panel, 0.8f)); // divider between the two rows
     for (size_t i = 0; i < knobSpecs.size(); ++i)
     {
         const auto& k = knobSpecs[i];
         const float v = (float) sliders[i]->valueToProportionOfLength (sliders[i]->getValue());
         if (k.mini)
         {
-            drawKnob (c, k.cx, k.cy, k.r, juce::Colour (0xff6b6a63), v);
-            c.small (k.label, k.cx, (int) (k.cy + k.r + 5), col::label, true);
+            const juce::String id = k.paramId;
+            juce::String label = k.label;
+            const int idx = juce::roundToInt (sliders[i]->getValue());
+            if (id == "character") label = ChaosGrainProcessor::characterNames()[idx].toUpperCase();
+            if (id == "scale" && idx > 0) label = ChaosGrainProcessor::scaleNames()[idx].toUpperCase();
+            const bool engaged = (id == "character" || id == "scale") && idx > 0;
+            drawKnob (c, k.cx, k.cy, k.r, engaged ? juce::Colour (0xffb8a03a) : juce::Colour (0xff6b6a63), v);
+            c.small (label, k.cx, (int) (k.cy + k.r + 5), col::label, true);
         }
         else
         {
@@ -585,6 +609,14 @@ void UnitView::mouseDown (const juce::MouseEvent& e)
     }
 }
 
+void UnitView::setScale (int newScale)
+{
+    scale = juce::jlimit (3, 4, newScale);
+    proc.apvts.state.setProperty ("uiScale", scale, nullptr);
+    setSize (lowW * scale, lowH * scale);
+    if (onScaleChanged) onScaleChanged();
+}
+
 void UnitView::loadViaChooser()
 {
     chooser = std::make_unique<juce::FileChooser> ("Choose a sample", juce::File(), proc.formatManager.getWildcardForAllFormats());
@@ -621,6 +653,10 @@ void UnitView::showMenu()
         const bool follow = proc.apvts.getRawParameterValue ("follow")->load() > 0.5f;
         m.addItem ("Follow (bursts on notes)", true, follow, [this, follow] { proc.apvts.getParameter ("follow")->setValueNotifyingHost (follow ? 0.0f : 1.0f); });
     }
+
+    m.addSeparator();
+    m.addItem ("Large UI", true, scale == 4, [this] { setScale (4); });
+    m.addItem ("Small UI", true, scale == 3, [this] { setScale (3); });
 
     m.showMenuAsync (juce::PopupMenu::Options().withMousePosition());
 }

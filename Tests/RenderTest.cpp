@@ -81,6 +81,7 @@ int main (int argc, char** argv)
         lp->applyPreset (5); // Glitch Storm: lots of randomness
         auto setP = [&] (const char* id, float v) { auto* q = lp->apvts.getParameter (id); q->setValueNotifyingHost (q->convertTo0to1 (v)); };
         setP ("hold", 1.0f); setP ("sync", 1.0f); setP ("rate", 4.0f); setP ("space", 0.0f); setP ("lock", (float) locked);
+        setP ("character", 0.0f); // Dust crackle is deliberately not part of the pattern
         lp->setPlayConfigDetails (0, 2, sr, block);
         lp->prepareToPlay (sr, block);
         const int numBlocks = (int) (sr * 6) / block + 1; // whole blocks only
@@ -98,6 +99,62 @@ int main (int argc, char** argv)
                 maxDiff = std::max (maxDiff, std::abs (out.getSample (ch, bar + i) - out.getSample (ch, 2 * bar + i)));
         const bool ok = locked ? maxDiff < 1.0e-3f : maxDiff > 0.05f;
         std::printf ("lock %-3s bar2 vs bar3 max diff %.6f  %s\n", locked ? "on" : "off", maxDiff, ok ? "OK" : "FAIL");
+        if (! ok) ++failures;
+    }
+
+    // KEY: scale snapping (0 = original pitch = root)
+    {
+        struct C { float in; int scale; float want; };
+        const C cases[] = { { 1.0f, 1, 0.0f }, { 3.0f, 1, 2.0f }, { 6.0f, 1, 5.0f }, { 4.0f, 2, 3.0f },
+                            { -1.0f, 2, -2.0f }, { 13.0f, 1, 12.0f }, { 6.0f, 4, 6.0f }, { 1.0f, 3, 0.0f },
+                            { 2.4f, 0, 2.4f }, { -12.0f, 2, -12.0f } };
+        bool ok = true;
+        for (auto& k : cases)
+        {
+            const float got = GrainEngine::snapToScale (k.in, k.scale);
+            if (std::abs (got - k.want) > 1.0e-4f) { ok = false; std::printf ("  snap(%.1f, %d) = %.1f, want %.1f\n", k.in, k.scale, got, k.want); }
+        }
+        std::printf ("key: scale snapping %s\n", ok ? "OK" : "FAIL");
+        if (! ok) ++failures;
+    }
+
+    // SWING: odd steps start late
+    {
+        const bool ok = GrainEngine::swungStepIndex (1.2, 0.0f) == 1 && GrainEngine::swungStepIndex (1.2, 1.0f) == 0
+                     && GrainEngine::swungStepIndex (1.6, 1.0f) == 1 && GrainEngine::swungStepIndex (2.0, 1.0f) == 2
+                     && GrainEngine::swungStepIndex (3.3, 0.5f) == 3 && GrainEngine::swungStepIndex (3.2, 0.5f) == 2;
+        std::printf ("swing: step timing %s\n", ok ? "OK" : "FAIL");
+        if (! ok) ++failures;
+    }
+
+    // CHARACTER: each mode renders sane audio; Dust crackle is silent without grains
+    for (int ch = 0; ch < 4; ++ch)
+    {
+        std::unique_ptr<ChaosGrainProcessor> cp (static_cast<ChaosGrainProcessor*> (createPluginFilter()));
+        cp->loadSample (input);
+        cp->applyPreset (0);
+        auto setP = [&] (const char* id, float v) { auto* q = cp->apvts.getParameter (id); q->setValueNotifyingHost (q->convertTo0to1 (v)); };
+        setP ("character", (float) ch); setP ("hold", 1.0f); setP ("pitchRand", 12.0f);
+        cp->setPlayConfigDetails (0, 2, sr, block);
+        cp->prepareToPlay (sr, block);
+        juce::AudioBuffer<float> buf (2, block);
+        juce::MidiBuffer midi;
+        float peak = 0.0f, energy = 0.0f;
+        bool fin = true;
+        for (int b = 0; b < (int) (3 * sr) / block; ++b)
+        {
+            cp->processBlock (buf, midi);
+            peak = std::max (peak, buf.getMagnitude (0, block));
+            energy += buf.getRMSLevel (0, 0, block);
+            for (int i = 0; i < block; ++i) fin = fin && std::isfinite (buf.getSample (0, i));
+        }
+        setP ("hold", 0.0f);
+        for (int b = 0; b < (int) (3 * sr) / block; ++b) cp->processBlock (buf, midi); // let it stop
+        float after = 0.0f;
+        for (int b = 0; b < (int) (1 * sr) / block; ++b) { cp->processBlock (buf, midi); after = std::max (after, buf.getMagnitude (0, block)); }
+        const bool ok = fin && peak > 0.01f && peak <= 1.0f && energy > 0.0f && after < 1.0e-4f;
+        std::printf ("character %-8s peak %.3f  silent after %.6f  %s\n",
+                     ChaosGrainProcessor::characterNames()[ch].toRawUTF8(), peak, after, ok ? "OK" : "FAIL");
         if (! ok) ++failures;
     }
 

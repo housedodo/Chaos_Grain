@@ -3,7 +3,7 @@
 #include <juce_gui_basics/juce_gui_basics.h>
 #include "PluginProcessor.h"
 
-// The plugin's whole UI: a 128x198 pixel-art "handheld unit" scaled up 4x, with three
+// The plugin's whole UI: a 128x222 pixel-art "handheld unit" scaled up 3x or 4x, with three
 // big knobs, a strip of small knobs (filter / space / ...), HOLD|FREEZE, SYNC and RAND
 // buttons, a phosphor screen, a grain counter and a density LED row.
 // Right-click for presets and the remaining options.
@@ -12,7 +12,10 @@ class UnitView : public juce::Component,
                  private juce::Timer
 {
 public:
-    static constexpr int lowW = 128, lowH = 198, scale = 4;
+    static constexpr int lowW = 128, lowH = 222;
+
+    int getScale() const { return scale; }
+    std::function<void()> onScaleChanged; // editor resizes itself
 
     explicit UnitView (ChaosGrainProcessor&);
     ~UnitView() override;
@@ -47,6 +50,8 @@ private:
     std::vector<std::unique_ptr<juce::Slider>> sliders;
     std::vector<std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment>> attachments;
     double randFlashMs = 0.0;
+    int scale = 4;
+    void setScale (int newScale);
     int lastOnsets = 0;
     double onsetFlashMs = 0.0;
 

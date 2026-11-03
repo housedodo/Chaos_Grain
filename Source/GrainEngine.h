@@ -54,6 +54,10 @@ struct GrainParams
 
     // Both builds
     bool  lock = false;        // repeat the current 16-event random pattern
+    int   character = 0;       // 0 Clean, 1 Tape, 2 Crystal, 3 Dust
+    int   scale = 0;           // 0 Off, 1 Major, 2 Minor, 3 Pentatonic, 4 Blues
+                               // (relative to the original pitch / what is played)
+    float swing = 0.0f;        // 0..1, delays every second synced step (1 = half a step)
 };
 
 struct TransportInfo
@@ -97,6 +101,14 @@ public:
     void requestNewPattern() { newPatternRequested.store (true); }
 
     static constexpr int patternLength = 16; // events per random cycle (LOCK repeats one)
+
+    // Snaps a transposition (semitones; 0 = original pitch = the scale's root) to the
+    // nearest interval of the scale. scale 0 = no change.
+    static float snapToScale (float semis, int scale);
+
+    // Swing helpers (exposed for tests). `stepPos` is the position in steps;
+    // returns the index of the step that has started, with odd steps delayed.
+    static juce::int64 swungStepIndex (double stepPos, float swing);
 
     // UI helper (message thread): min/max peaks of the recent live buffer, oldest -> newest,
     // covering the same span the grain positions are normalised to.
@@ -185,4 +197,12 @@ private:
     // Resonant low-pass (TPT state-variable filter), per channel
     float svfG = 0.0f;
     float ic1[2] {}, ic2[2] {};
+
+    // CHARACTER state
+    double wowPhase = 0.0, flutterPhase = 0.0;
+    float tapeLp[2] {};
+    float holdL = 0.0f, holdR = 0.0f, holdCount = 0.0f;
+    float wetEnv = 0.0f;
+    float crackle = 0.0f;
+    bool swingOdd = false;
 };

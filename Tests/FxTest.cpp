@@ -194,6 +194,17 @@ int main (int argc, char** argv)
         writeWav (outDir.getChildFile ("fx_max_feedback.wav"), out);
     }
 
+    // 3b. Every CHARACTER with feedback stays finite and bounded
+    for (int ch = 0; ch < 4; ++ch)
+    {
+        Rig r (input);
+        r.set ("mix", 1.0f); r.set ("repeats", 0.6f); r.set ("character", (float) ch); r.set ("scale", 2.0f); r.set ("swing", 0.5f);
+        auto out = r.run (4.0);
+        const float peak = out.getMagnitude (0, out.getNumSamples());
+        check (finite (out) && peak <= 1.0f && rms (out, 1.0) > 0.005f,
+               ("character " + ChaosGrainProcessor::characterNames()[ch] + ": sane (peak)").toRawUTF8(), peak);
+    }
+
     // 4. Musical render for listening
     {
         Rig r (input);
