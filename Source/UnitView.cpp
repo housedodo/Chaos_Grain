@@ -254,7 +254,7 @@ std::vector<UnitView::KnobSpec> UnitView::makeKnobSpecs()
     };
 
     const std::vector<std::pair<const char*, const char*>> minis = kIsFx
-        ? std::vector<std::pair<const char*, const char*>> { { "filter", "FILTER" }, { "space", "SPACE" }, { "repeats", "REPEAT" }, { "memory", "MEMORY" } }
+        ? std::vector<std::pair<const char*, const char*>> { { "filter", "FILTER" }, { "space", "SPACE" }, { "repeats", "REPEAT" }, { "rate", "TIME" } }
         : std::vector<std::pair<const char*, const char*>> { { "filter", "FILTER" }, { "reso", "RESO" }, { "space", "SPACE" } };
 
     for (size_t i = 0; i < minis.size(); ++i)
@@ -474,6 +474,20 @@ void UnitView::render (juce::Image& img)
         }
     }
 
+    // FX: mode selector at the top of the screen  "< MODE >"
+    if (kIsFx)
+    {
+        const int mode = (int) proc.apvts.getRawParameterValue ("mode")->load();
+        const auto name = ChaosGrainProcessor::modeNames()[mode].toUpperCase();
+        const float cx = scrX + scrW / 2.0f;
+        const int ty = scrY + 3;
+        const int w = name.length() * 6 - 1;
+        c.rect ((int) (cx - w / 2.0f) - 3, ty - 1, w + 6, 9, col::scrB);
+        c.text (name, cx, ty, col::phos, true);
+        c.text ("<", (float) scrX + 6, ty, col::glow, false);
+        c.text (">", (float) (scrX + scrW - 10), ty, col::glow, false);
+    }
+
     if (dragging)
     {
         c.rect (scrX, scrY, scrW, 1, col::seg); c.rect (scrX, scrY + scrH - 1, scrW, 1, col::seg);
@@ -497,6 +511,12 @@ void UnitView::render (juce::Image& img)
         if (id == "space")   { caption = "SPACE %";   readout = pct(); }
         if (id == "repeats") { caption = "REPEATS %"; readout = pct(); }
         if (id == "memory")  { caption = "MEMORY S";  readout = juce::String (v, 2); }
+        if (id == "rate")
+        {
+            const auto name = ChaosGrainProcessor::rateNames()[juce::roundToInt (v)];
+            caption = "TIME " + name;
+            readout = name.fromFirstOccurrenceOf ("/", false, false).retainCharacters ("0123456789");
+        }
         if (id == "character") { caption = "CHAR " + ChaosGrainProcessor::characterNames()[juce::roundToInt (v)].toUpperCase(); readout = juce::String (juce::roundToInt (v) + 1); }
         if (id == "scale")   { caption = "KEY " + ChaosGrainProcessor::scaleNames()[juce::roundToInt (v)].toUpperCase(); readout = juce::roundToInt (v) == 0 ? "-" : juce::String (juce::roundToInt (v)); }
         if (id == "swing")   { caption = "SWING %";   readout = pct(); }
@@ -546,6 +566,7 @@ void UnitView::render (juce::Image& img)
             const int idx = juce::roundToInt (sliders[i]->getValue());
             if (id == "character") label = ChaosGrainProcessor::characterNames()[idx].toUpperCase();
             if (id == "scale" && idx > 0) label = ChaosGrainProcessor::scaleNames()[idx].toUpperCase();
+            if (id == "rate") label = ChaosGrainProcessor::rateNames()[idx];
             const bool engaged = (id == "character" || id == "scale") && idx > 0;
             drawKnob (c, k.cx, k.cy, k.r, engaged ? juce::Colour (0xffb8a03a) : juce::Colour (0xff6b6a63), v);
             c.small (label, k.cx, (int) (k.cy + k.r + 5), col::label, true);
@@ -603,6 +624,14 @@ void UnitView::mouseDown (const juce::MouseEvent& e)
         randFlashMs = juce::Time::getMillisecondCounterHiRes();
         proc.randomize();
     }
+    else if (kIsFx && juce::Rectangle<int> (crtX, crtY, crtW, crtH).contains (p))
+    {
+        // Click the left half of the screen for the previous mode, right half for the next.
+        auto* mode = dynamic_cast<juce::AudioParameterChoice*> (proc.apvts.getParameter ("mode"));
+        const int n = mode->choices.size();
+        const int next = (mode->getIndex() + (p.x < crtX + crtW / 2 ? n - 1 : 1)) % n;
+        mode->setValueNotifyingHost (mode->convertTo0to1 ((float) next));
+    }
     else if (! kIsFx && juce::Rectangle<int> (crtX, crtY, crtW, crtH).contains (p))
     {
         loadViaChooser();
@@ -640,8 +669,24 @@ void UnitView::showMenu()
     const bool hold = proc.apvts.getRawParameterValue (holdId)->load() > 0.5f;
 
     juce::PopupMenu m;
-    if (! kIsFx) m.addItem ("Load sample...", [this] { loadViaChooser(); });
-    m.addSubMenu ("Presets", presets);
+    if (! kIsFx)
+    {
+        m.addItem ("Load sample...", [this] { loadViaChooser(); });
+        m.addSubMenu ("Presets", presets);
+    }
+    else
+    {
+        juce::PopupMenu modes;
+        const auto modeNames = ChaosGrainProcessor::modeNames();
+        const int current = (int) proc.apvts.getRawParameterValue ("mode")->load();
+        for (int i = 0; i < modeNames.size(); ++i)
+            modes.addItem (modeNames[i], true, i == current, [this, i]
+            {
+                auto* mode = proc.apvts.getParameter ("mode");
+                mode->setValueNotifyingHost (mode->convertTo0to1 ((float) i));
+            });
+        m.addSubMenu ("Mode", modes);
+    }
     m.addItem ("Randomize", [this] { proc.randomize(); });
     m.addSeparator();
     m.addItem (kIsFx ? "Freeze" : "Hold (drone)", true, hold, [this, hold, holdId] { proc.apvts.getParameter (holdId)->setValueNotifyingHost (hold ? 0.0f : 1.0f); });

@@ -68,7 +68,7 @@ APVTS::ParameterLayout ChaosGrainProcessor::createLayout()
 
     layout.add (pct ("pan", "Stereo Spread", 0.5f));
     layout.add (std::make_unique<AudioParameterBool> (ParameterID { "sync", 1 }, "Tempo Sync", false));
-    layout.add (std::make_unique<AudioParameterChoice> (ParameterID { "rate", 1 }, "Sync Rate", rateNames(), 3));
+    layout.add (std::make_unique<AudioParameterChoice> (ParameterID { "rate", 1 }, kIsFx ? "Time" : "Sync Rate", rateNames(), kIsFx ? 4 : 3));
     if (! kIsFx)
     {
         layout.add (ms ("attack", "Attack", 1.0f, 5000.0f, 10.0f));
@@ -106,6 +106,7 @@ APVTS::ParameterLayout ChaosGrainProcessor::createLayout()
             AudioParameterFloatAttributes().withStringFromValueFunction ([] (float v, int) { return String (v, 2) + " s"; })));
         layout.add (std::make_unique<AudioParameterBool> (ParameterID { "freeze", 1 }, "Freeze", false));
         layout.add (std::make_unique<AudioParameterBool> (ParameterID { "follow", 1 }, "Follow", false));
+        layout.add (std::make_unique<AudioParameterChoice> (ParameterID { "mode", 1 }, "Mode", modeNames(), 0));
     }
 
     return layout;
@@ -169,6 +170,7 @@ GrainParams ChaosGrainProcessor::readParams() const
     p.character  = (int) get ("character");
     p.scale      = (int) get ("scale");
     p.swing      = get ("swing");
+    p.mode       = kIsFx ? (int) get ("mode") : (int) GrainEngine::Granular;
     return p;
 }
 
@@ -364,6 +366,11 @@ void ChaosGrainProcessor::randomize()
     setParam ("filter",    chance (0.6f) ? 20000.0f : std::exp (rnd (std::log (800.0f), std::log (9000.0f))));
     setParam ("reso",      rnd (0.0f, 0.5f));
     setParam ("repeats",   chance (0.4f) ? 0.0f : rnd (0.1f, 0.7f)); // FX only (ignored if missing)
+    if (kIsFx)
+    {
+        setParam ("chaos", rnd (0.3f, 1.8f));          // mode activity
+        setParam ("rate",  (float) (2 + r.nextInt (4))); // 1/4 .. 1/32
+    }
 }
 
 juce::StringArray ChaosGrainProcessor::getPresetNames()

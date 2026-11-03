@@ -58,6 +58,9 @@ struct GrainParams
     int   scale = 0;           // 0 Off, 1 Major, 2 Minor, 3 Pentatonic, 4 Blues
                                // (relative to the original pitch / what is played)
     float swing = 0.0f;        // 0..1, delays every second synced step (1 = half a step)
+
+    // FX build: musical mode (see GrainEngine::Mode). Instrument always uses Grain.
+    int   mode = 8;
 };
 
 struct TransportInfo
@@ -102,6 +105,13 @@ public:
 
     static constexpr int patternLength = 16; // events per random cycle (LOCK repeats one)
 
+    // FX modes: tempo-synced algorithms that turn what you play into new material.
+    enum Mode { Arp = 0, Cascade, Harmony, Kaleido, Shuffle, Bend, Cloud, Stutter, Granular, numModes };
+
+    // Semitones of a scale degree (degree 0 = root; negative degrees go down).
+    // scale 0 (KEY off) uses a neutral root/fifth table so it fits any key.
+    static float degreeSemis (int degree, int scale);
+
     // Snaps a transposition (semitones; 0 = original pitch = the scale's root) to the
     // nearest interval of the scale. scale 0 = no change.
     static float snapToScale (float semis, int scale);
@@ -128,6 +138,7 @@ private:
         bool active = false;
         double pos = 0.0;       // read position in source samples
         double increment = 1.0; // source samples per output sample (negative = reverse)
+        double incMul = 1.0;    // per-sample multiplier on increment (pitch glide)
         int length = 0;         // output samples
         int age = 0;
         float fade = 0.1f;      // fraction of the grain used for each fade
@@ -156,6 +167,16 @@ private:
     float rand01() { return patternRng.nextFloat(); }
     float randBi() { return patternRng.nextFloat() * 2.0f - 1.0f; }
     void nextEvent (bool lock, bool boundary);
+
+    // ---- FX modes ----
+    struct Pending { int delay; double start; double ratio; int len; bool rev; float pan; float amp; float fade; double incMul; };
+    void spawnAt (const SourceView& src, double absStart, double ratio, int len, bool rev,
+                  float pan, float amp, float fade, double incMul, bool frozen);
+    void schedule (int delay, double absStart, double ratio, int len, bool rev, float pan, float amp, float fade, double incMul = 1.0);
+    void modeStep (const GrainParams& p, juce::int64 step, const SourceView& src);
+    void modeOnset (const GrainParams& p);
+    double recentStart() const;
+    float modeSemis (int arpIndex, int scale) const;
 
     double sr = 44100.0;
     std::array<Grain, maxGrains> grains;
@@ -205,4 +226,19 @@ private:
     float wetEnv = 0.0f;
     float crackle = 0.0f;
     bool swingOdd = false;
+
+    // FX mode state
+    std::array<Pending, 128> pending {};
+    int numPending = 0;
+    juce::int64 modeLastStep = std::numeric_limits<juce::int64>::min();
+    double internalStepPos = 0.0;
+    double lastOnsetPos = 0.0;              // ring index of the last detected attack
+    juce::int64 sinceOnset = 1 << 30;       // samples since that attack
+    double barMark = -1.0, barMarkPrev = -1.0;
+    int lastSlice = 0;
+    // per-block mode context
+    double mStep = 1.0, mBeat = 1.0, mBar = 1.0;
+    float mA = 0.5f, mGate = 0.8f;
+    bool mGateOpen = true;
+    int mStepsPerBar = 16;
 };

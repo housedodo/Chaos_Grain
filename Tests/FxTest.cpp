@@ -21,6 +21,7 @@ namespace
         {
             proc->setPlayConfigDetails (2, 2, sr, block);
             proc->prepareToPlay (sr, block);
+            set ("mode", (float) GrainEngine::Granular); // classic engine unless a test picks a mode
         }
 
         void set (const char* id, float v)
@@ -205,6 +206,55 @@ int main (int argc, char** argv)
                ("character " + ChaosGrainProcessor::characterNames()[ch] + ": sane (peak)").toRawUTF8(), peak);
     }
 
+    // 5. MODES: piano-like plucks at 220 Hz. Every mode must sound; the melodic modes must
+    //    create pitches that were never played (5ths/octaves) - i.e. change the melody.
+    {
+        juce::AudioBuffer<float> plucks (1, (int) (sr * 2.0));
+        plucks.clear();
+        for (int n = 0; n < 4; ++n)
+            for (int i = 0; i < (int) (0.45 * sr); ++i)
+            {
+                const float tt = (float) i / (float) sr;
+                plucks.setSample (0, n * (int) (0.5 * sr) + i,
+                                  0.5f * std::sin (juce::MathConstants<float>::twoPi * 220.0f * tt) * std::exp (-tt / 0.15f));
+            }
+
+        auto goertzel = [] (const juce::AudioBuffer<float>& b, int from, float freq)
+        {
+            const float w = juce::MathConstants<float>::twoPi * freq / (float) sr, cw = 2.0f * std::cos (w);
+            float s1 = 0.0f, s2 = 0.0f;
+            for (int i = from; i < b.getNumSamples(); ++i)
+            {
+                const float s0 = b.getSample (0, i) + cw * s1 - s2;
+                s2 = s1; s1 = s0;
+            }
+            return s1 * s1 + s2 * s2 - cw * s1 * s2;
+        };
+
+        const auto names = ChaosGrainProcessor::modeNames();
+        for (int m = 0; m < GrainEngine::Granular; ++m)
+        {
+            Rig r (plucks);
+            r.set ("mode", (float) m); r.set ("mix", 1.0f); r.set ("space", 0.0f); r.set ("repeats", 0.0f);
+            auto out = r.run (6.0);
+            const float peak = out.getMagnitude (0, out.getNumSamples());
+            const float level = rms (out, 1.0);
+            check (finite (out) && peak <= 1.0f && level > 0.003f,
+                   ("mode " + names[m] + ": sounds (rms)").toRawUTF8(), level);
+
+            if (m == GrainEngine::Arp || m == GrainEngine::Cascade || m == GrainEngine::Harmony)
+            {
+                const int from = (int) sr;
+                const float played = goertzel (out, from, 220.0f);
+                const float created = goertzel (out, from, 329.63f) + goertzel (out, from, 440.0f)
+                                    + goertzel (out, from, 659.26f) + goertzel (out, from, 880.0f)
+                                    + goertzel (out, from, 146.83f) + goertzel (out, from, 110.0f);
+                const float ratio = created / juce::jmax (1.0e-9f, played);
+                check (ratio > 0.3f, ("mode " + names[m] + ": new pitches vs played (ratio)").toRawUTF8(), ratio);
+            }
+        }
+    }
+
     // 4. Musical render for listening
     {
         Rig r (input);
@@ -220,6 +270,7 @@ int main (int argc, char** argv)
 
         if (argc > 3)
         {
+            r.set ("mode", (float) GrainEngine::Arp); r.set ("scale", 2.0f); r.set ("character", 2.0f);
             for (int adv = 0; adv < 2; ++adv)
             {
                 r.set ("freeze", adv == 0 ? 0.0f : 1.0f);

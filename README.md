@@ -10,7 +10,7 @@ Everything lives on one compact pixel-art "grain unit":
 - **Three big knobs**: **SIZE** (grain length: short = glitch, long = pads/chops), **CHAOS**
   (one knob that scales all the randomness) and **PITCH** (instrument) or **MIX** (FX).
 - **Small knobs** along the bottom: **FILTER · RESO · SPACE** (instrument) or
-  **FILTER · SPACE · REPEAT · MEMORY** (FX).
+  **FILTER · SPACE · REPEAT · TIME** (FX).
 - **Small buttons** at the top: the red **HOLD** (instrument: drone without MIDI) or **FREEZE**
   (FX), **SYNC** (lock grains to the DAW tempo; lights up when on) and **RAND** (randomize).
 - **Second row of small knobs** (both):
@@ -40,6 +40,30 @@ Everything lives on one compact pixel-art "grain unit":
 The deeper settings below (position, spray, slices, reverse...) have no knob of their own; they are
 set by the presets and RAND, and every one of them can be automated from your DAW.
 
+## FX modes
+
+ChaosGrain FX runs one of nine **modes**, tempo-synced algorithms that turn what you play into
+something new. Pick a mode at the top of the screen: click the left half of the screen for the
+previous mode, the right half for the next (or right-click > Mode).
+
+| Mode | What it does with your playing |
+|---|---|
+| **ARP** | Re-plays your last note as an arpeggio (up, up-down, or random as CHAOS rises) |
+| **CASCADE** | Every note triggers a fast harp-like run of scale notes |
+| **HARMONY** | Pitched echoes on 3rds / 5ths / octaves that build countermelodies |
+| **KALEIDO** | Loops of the last bars at half, normal and double speed and reversed, layered |
+| **SHUFFLE** | The last bar cut into steps and replayed in a new order on the grid |
+| **BEND** | Loops whose pitch glides up and down |
+| **CLOUD** | Dense shimmering granular haze |
+| **STUTTER** | Rhythmic ratchets and tape-stop drops |
+| **GRAIN** | The free granular engine (all granular parameters, FOLLOW bursts) |
+
+In the modes: **CHAOS** = how wild (pattern, density, variation), **SIZE** = note length
+(staccato to legato), **TIME** = step length (1/4 to 1/32, follows the DAW tempo), **KEY** = the
+scale the melodic modes use (KEY off = roots, fifths and octaves only, which fit any key),
+**PITCH** (automation) transposes, **LOCK** repeats the pattern, **FOLLOW** limits continuous modes
+to the bar after you play, and **FREEZE** keeps the current material.
+
 ## Two plugins
 
 | | **ChaosGrain** (instrument) | **ChaosGrain FX** (effect) |
@@ -47,7 +71,7 @@ set by the presets and RAND, and every one of them can be automated from your DA
 | Goes on | an instrument / MIDI track | any audio track (guitar, synth, vocals, bus) |
 | Sound source | a loaded sample | the live input, recorded continuously (last ~10 s) |
 | Big knobs | SIZE · CHAOS · PITCH | SIZE · CHAOS · MIX |
-| Small knobs | FILTER · RESO · SPACE | FILTER · SPACE · REPEAT · MEMORY |
+| Small knobs | FILTER · RESO · SPACE | FILTER · SPACE · REPEAT · TIME |
 | Red button | HOLD (drone without MIDI) | FREEZE (stop recording, keep playing the buffer) |
 | Mode buttons | LOCK | LOCK · FOLLOW |
 | Second row | CHAR · KEY · SWING | CHAR · KEY · SWING |

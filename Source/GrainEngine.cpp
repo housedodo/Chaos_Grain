@@ -76,6 +76,11 @@ void GrainEngine::reset()
     refractory = followRemaining = 0;
     eventCount = patternLength;
     pendingBoundary = false;
+    numPending = 0;
+    modeLastStep = std::numeric_limits<juce::int64>::min();
+    internalStepPos = 0.0;
+    sinceOnset = 1 << 30;
+    barMark = barMarkPrev = -1.0;
 }
 
 void GrainEngine::killAllGrains()
@@ -140,18 +145,43 @@ int GrainEngine::pickVoice()
     return n == 0 ? -1 : candidates[patternRng.nextInt (n)];
 }
 
+namespace
+{
+    const std::vector<int>& scaleTable (int scale)
+    {
+        static const std::array<std::vector<int>, 5> scales = { {
+            { 0, 7 },                    // KEY off: root + fifth (fits any key)
+            { 0, 2, 4, 5, 7, 9, 11 },    // major
+            { 0, 2, 3, 5, 7, 8, 10 },    // natural minor
+            { 0, 2, 4, 7, 9 },           // major pentatonic
+            { 0, 3, 5, 6, 7, 10 },       // blues
+        } };
+        return scales[(size_t) juce::jlimit (0, 4, scale)];
+    }
+}
+
+float GrainEngine::degreeSemis (int degree, int scale)
+{
+    const auto& t = scaleTable (scale);
+    const int n = (int) t.size();
+    const int oct = (degree >= 0) ? degree / n : -((-degree + n - 1) / n);
+    return (float) (t[(size_t) (degree - oct * n)] + 12 * oct);
+}
+
+float GrainEngine::modeSemis (int idx, int scale) const
+{
+    // Arpeggio index -> chord tones: 7-note scales use root/3rd/5th per octave,
+    // smaller tables just walk their degrees.
+    const int n = (int) scaleTable (scale).size();
+    const int deg = (n == 7) ? (idx % 3) * 2 + 7 * (idx / 3) : idx;
+    return degreeSemis (deg, scale);
+}
+
 float GrainEngine::snapToScale (float semis, int scale)
 {
-    static const std::array<std::vector<int>, 5> scales = { {
-        {},                          // off
-        { 0, 2, 4, 5, 7, 9, 11 },    // major
-        { 0, 2, 3, 5, 7, 8, 10 },    // natural minor
-        { 0, 2, 4, 7, 9 },           // major pentatonic
-        { 0, 3, 5, 6, 7, 10 },       // blues
-    } };
-    if (scale <= 0 || scale >= (int) scales.size()) return semis;
+    if (scale <= 0 || scale > 4) return semis;
 
-    const auto& deg = scales[(size_t) scale];
+    const auto& deg = scaleTable (scale);
     const int s = (int) std::round (semis);
     int best = s, bestDist = 99;
     for (int d = -6; d <= 6; ++d)
@@ -292,6 +322,7 @@ void GrainEngine::spawnGrain (const SourceView& src, const GrainParams& p, float
     g->pos = reversed ? startPos + ratio * lengthOut : startPos;
     if (g->pos >= len) g->pos -= len;
     g->increment = reversed ? -ratio : ratio;
+    g->incMul = 1.0;
     g->length = lengthOut;
     g->age = 0;
     const float shape = p.character == 2 ? juce::jmax (p.shape, 0.75f) : p.shape; // Crystal: soft edges
@@ -320,7 +351,22 @@ void GrainEngine::render (juce::AudioBuffer<float>& out, int startSample, int nu
                           const SampleBuffer* source, const float* inL, const float* inR,
                           const GrainParams& p, const TransportInfo& t)
 {
-    syncMode = p.sync;
+    // FX modes: Cloud and Grain run on the classic granular scheduler (Cloud with its
+    // own settings); every other mode runs its own tempo-synced algorithm.
+    const bool modeActive = live && p.mode < Granular && p.mode != Cloud;
+    GrainParams cloudP = p;
+    if (live && p.mode == Cloud)
+    {
+        const float a = juce::jlimit (0.0f, 1.0f, p.chaos * 0.5f);
+        const float sn = juce::jlimit (0.0f, 1.0f, std::log (p.sizeMs / 5.0f) / std::log (400.0f));
+        cloudP.position = 1.0f; cloudP.scan = 0.0f; cloudP.slices = 1; cloudP.jumble = 0.0f; cloudP.repeat = 0.0f;
+        cloudP.spray = 0.25f + 0.5f * a;   cloudP.pitchRand = 12.0f * a; cloudP.pitchQuant = 2;
+        cloudP.shape = 0.9f;               cloudP.density = 18.0f + 40.0f * a;
+        cloudP.sizeMs = 60.0f + 900.0f * sn; cloudP.reverse = 0.25f * a; cloudP.sync = false; cloudP.chaos = 1.0f;
+    }
+    const GrainParams& cp = cloudP; // parameters for the classic scheduler
+
+    syncMode = cp.sync;
 
     // Hold = an always-on voice at middle C. A live effect is always "holding".
     const bool holdOn = p.hold || live;
@@ -351,10 +397,18 @@ void GrainEngine::render (juce::AudioBuffer<float>& out, int startSample, int nu
     const double bpm = t.bpm > 0.0 ? t.bpm : 120.0;
     const double samplesPerStep = juce::jmax (1.0, p.stepBeats * 60.0 / bpm * sr);
     const double ppqPerSample = bpm / 60.0 / sr;
-    const double effectiveDensity = p.sync ? sr / samplesPerStep : (double) p.density;
-    const float overlap = (float) (effectiveDensity * p.sizeMs * 0.001);
+    const double effectiveDensity = cp.sync ? sr / samplesPerStep : (double) cp.density;
+    const float overlap = (float) (effectiveDensity * cp.sizeMs * 0.001);
     const float gainComp = 1.0f / std::sqrt (juce::jmax (1.0f, overlap));
-    const double freeInterval = sr / juce::jmax (0.1, (double) p.density);
+    const double freeInterval = sr / juce::jmax (0.1, (double) cp.density);
+
+    // Mode context (tempo, activity, note length)
+    mStep = samplesPerStep;
+    mBeat = 60.0 / bpm * sr;
+    mBar = 4.0 * mBeat;
+    mStepsPerBar = juce::jmax (1, (int) std::round (4.0 / p.stepBeats));
+    mA = juce::jlimit (0.0f, 1.0f, p.chaos * 0.5f);
+    mGate = 0.15f + 0.85f * juce::jlimit (0.0f, 1.0f, std::log (p.sizeMs / 5.0f) / std::log (400.0f));
 
     lastSrcLen = srcLen;
     sizeSamples = p.sizeMs * 0.001 * sr;
@@ -393,7 +447,7 @@ void GrainEngine::render (juce::AudioBuffer<float>& out, int startSample, int nu
     const float followFastRel = std::exp (-1.0f / (0.020f * (float) sr));
     const float followSlowAtt = 1.0f - std::exp (-1.0f / (0.040f * (float) sr));
     const float followSlowRel = 1.0f - std::exp (-1.0f / (0.250f * (float) sr));
-    const int followWindow = (int) juce::jmax (0.15 * sr, 3.0 * sizeSamples);
+    const int followWindow = (int) juce::jmax (0.15 * sr, 3.0 * cp.sizeMs * 0.001 * sr);
     if (! p.follow) followRemaining = 0;
 
     float* outL = out.getWritePointer (0);
@@ -431,8 +485,9 @@ void GrainEngine::render (juce::AudioBuffer<float>& out, int startSample, int nu
             currentBase = live ? (b > 1.0f ? b - std::floor (b) : b) : wrap01 (b);
         }
 
-        // FOLLOW: detect note onsets on the input; each one opens a burst window
-        if (live && p.follow && inL != nullptr)
+        // Note onsets on the input: FOLLOW bursts (Grain/Cloud) and note-driven modes
+        ++sinceOnset;
+        if (live && inL != nullptr)
         {
             const float x = 0.5f * (std::abs (inL[i]) + std::abs (inR != nullptr ? inR[i] : inL[i]));
             envFast = x > envFast ? x : envFast * followFastRel;
@@ -441,25 +496,41 @@ void GrainEngine::render (juce::AudioBuffer<float>& out, int startSample, int nu
             else if (envFast > 0.01f && envFast > envSlow * 1.8f + 0.003f)
             {
                 refractory = (int) (0.07 * sr);
-                followRemaining = followWindow;
-                samplesToNextGrain = 0.0;      // first grain right on the attack
-                lastStepIndex = -1;
-                pendingBoundary = true;         // each note starts a pattern cycle
+                if (p.follow)
+                {
+                    followRemaining = followWindow;
+                    samplesToNextGrain = 0.0;      // first grain right on the attack
+                    lastStepIndex = -1;
+                    pendingBoundary = true;         // each note starts a pattern cycle
+                }
+                lastOnsetPos = (double) writeHead - 0.004 * sr; // just before the attack
+                if (lastOnsetPos < 0.0) lastOnsetPos += ringLen;
+                sinceOnset = 0;
                 uiOnsets.fetch_add (1, std::memory_order_relaxed);
+                if (modeActive) modeOnset (p);
             }
         }
         const bool gateOpen = ! (live && p.follow) || followRemaining > 0;
         if (followRemaining > 0) --followRemaining;
+        mGateOpen = ! p.follow || sinceOnset < (juce::int64) mBar; // modes: play for a bar after a note
 
-        // Scheduler
-        if (srcLen > 0)
+        if (modeActive && srcLen > 0)
+        {
+            // Mode clock: host grid while playing, otherwise an internal clock at host tempo
+            double stepPos;
+            if (t.isPlaying) stepPos = (t.ppqAtBlockStart + (blockOffset + i) * ppqPerSample) / p.stepBeats;
+            else { internalStepPos += 1.0 / samplesPerStep; stepPos = internalStepPos; }
+            const auto step = swungStepIndex (stepPos + 1.0e-9, p.swing);
+            if (step != modeLastStep) { modeLastStep = step; modeStep (p, step, src); }
+        }
+        else if (srcLen > 0) // Scheduler (classic granular)
         {
             bool trigger = false;
 
-            if (p.sync && t.isPlaying)
+            if (cp.sync && t.isPlaying)
             {
                 const double ppq = t.ppqAtBlockStart + (blockOffset + i) * ppqPerSample;
-                const auto step = swungStepIndex (ppq / p.stepBeats + 1.0e-9, p.swing);
+                const auto step = swungStepIndex (ppq / cp.stepBeats + 1.0e-9, cp.swing);
                 if (step != lastStepIndex)
                 {
                     lastStepIndex = step;
@@ -467,8 +538,8 @@ void GrainEngine::render (juce::AudioBuffer<float>& out, int startSample, int nu
                     {
                         // Cycles line up with the bar grid so a locked pattern loops in time.
                         const auto m = step % patternLength;
-                        nextEvent (p.lock, m == 0 || pendingBoundary);
-                        trigger = rand01() >= p.jitter * p.chaos * 0.5f;
+                        nextEvent (cp.lock, m == 0 || pendingBoundary);
+                        trigger = rand01() >= cp.jitter * cp.chaos * 0.5f;
                     }
                 }
             }
@@ -482,18 +553,18 @@ void GrainEngine::render (juce::AudioBuffer<float>& out, int startSample, int nu
                 samplesToNextGrain -= 1.0;
                 if (samplesToNextGrain <= 0.0)
                 {
-                    nextEvent (p.lock, eventCount >= patternLength || pendingBoundary);
-                    if (p.sync)
+                    nextEvent (cp.lock, eventCount >= patternLength || pendingBoundary);
+                    if (cp.sync)
                     {
                         // Swing: long-short pairs (even step longer, odd step shorter)
-                        const double sw = 0.5 * juce::jlimit (0.0, 1.0, (double) p.swing);
+                        const double sw = 0.5 * juce::jlimit (0.0, 1.0, (double) cp.swing);
                         samplesToNextGrain += samplesPerStep * (swingOdd ? 1.0 - sw : 1.0 + sw);
                         swingOdd = ! swingOdd;
-                        trigger = rand01() >= p.jitter * p.chaos * 0.5f;
+                        trigger = rand01() >= cp.jitter * cp.chaos * 0.5f;
                     }
                     else
                     {
-                        const double j = juce::jmin (0.95, (double) (p.jitter * p.chaos));
+                        const double j = juce::jmin (0.95, (double) (cp.jitter * cp.chaos));
                         samplesToNextGrain += juce::jmax (1.0, freeInterval * (1.0 + j * randBi()));
                         trigger = true;
                     }
@@ -502,7 +573,19 @@ void GrainEngine::render (juce::AudioBuffer<float>& out, int startSample, int nu
                 lastStepIndex = -1;
             }
 
-            if (trigger) spawnGrain (src, p, gainComp);
+            if (trigger) spawnGrain (src, cp, gainComp);
+        }
+
+        // Scheduled mode events that are due
+        for (int n = 0; n < numPending;)
+        {
+            if (--pending[(size_t) n].delay <= 0)
+            {
+                const auto e = pending[(size_t) n];
+                pending[(size_t) n] = pending[(size_t) --numPending];
+                spawnAt (src, e.start, e.ratio, e.len, e.rev, e.pan, e.amp, e.fade, e.incMul, p.freeze);
+            }
+            else ++n;
         }
 
         // Tape: whole "tape speed" wobbles (slow wow + fast flutter)
@@ -531,6 +614,7 @@ void GrainEngine::render (juce::AudioBuffer<float>& out, int startSample, int nu
                 r += sR * w * g.gainR;
 
                 g.pos += g.increment * speedMod;
+                g.increment *= g.incMul;
                 if (g.pos >= srcLen) g.pos -= srcLen;
                 else if (g.pos < 0.0) g.pos += srcLen;
 
@@ -654,5 +738,195 @@ void GrainEngine::getLivePeaks (std::vector<std::pair<float, float>>& peaks, int
             hi = juce::jmax (hi, v);
         }
         peaks[(size_t) c] = { lo, hi };
+    }
+}
+
+//==============================================================================
+// FX modes
+//==============================================================================
+double GrainEngine::recentStart() const
+{
+    // The attack of the last note you played (if recent), otherwise the last step.
+    if (sinceOnset < (juce::int64) (2.0 * mBar)) return lastOnsetPos;
+    return (double) writeHead - mStep;
+}
+
+void GrainEngine::schedule (int delay, double absStart, double ratio, int len, bool rev, float pan, float amp, float fade, double incMul)
+{
+    if (numPending >= (int) pending.size()) return;
+    pending[(size_t) numPending++] = { juce::jmax (1, delay), absStart, ratio, len, rev, pan, amp, fade, incMul };
+}
+
+void GrainEngine::spawnAt (const SourceView& src, double absStart, double ratio, int len, bool rev,
+                           float pan, float amp, float fade, double incMul, bool frozen)
+{
+    if (src.len <= 0 || len < 16) return;
+    Grain* g = nullptr;
+    for (auto& gr : grains)
+        if (! gr.active) { g = &gr; break; }
+    if (g == nullptr) return;
+
+    // Never let a grain overtake the write head (or the frozen end of the buffer).
+    const double L = (double) src.len;
+    const double ratioMax = ratio * (incMul > 1.0 ? std::pow (incMul, (double) len) : 1.0);
+    const double need = (rev || frozen) ? ratioMax * len + 4.0
+                                        : juce::jmax (0.0, (ratioMax - 1.0) * len) + 4.0;
+    double back = (double) writeHead - absStart;
+    back -= std::floor (back / L) * L;
+    if (back < need) back = need;
+    back = juce::jmin (back, L - 64.0);
+
+    double start = (double) writeHead - back;
+    start -= std::floor (start / L) * L;
+    double pos = rev ? start + ratio * len : start;
+    pos -= std::floor (pos / L) * L;
+
+    g->pos = pos;
+    g->increment = rev ? -ratio : ratio;
+    g->incMul = incMul;
+    g->length = len;
+    g->age = 0;
+    g->fade = juce::jlimit (0.02f, 0.5f, fade);
+    g->voice = holdVoice;
+    const float pn = juce::jlimit (0.0f, 1.0f, pan);
+    g->gainL = amp * juce::MathConstants<float>::sqrt2 * std::cos (pn * juce::MathConstants<float>::halfPi);
+    g->gainR = amp * juce::MathConstants<float>::sqrt2 * std::sin (pn * juce::MathConstants<float>::halfPi);
+    g->active = true;
+}
+
+void GrainEngine::modeStep (const GrainParams& p, juce::int64 step, const SourceView& src)
+{
+    juce::ignoreUnused (src);
+    const int spb = mStepsPerBar;
+    const int k = (int) (((step % spb) + spb) % spb);
+    if (k == 0 && ! p.freeze) { barMarkPrev = barMark; barMark = (double) writeHead; }
+
+    // Random pattern cycles line up with the grid, so LOCK loops in time.
+    nextEvent (p.lock, ((step % patternLength) + patternLength) % patternLength == 0);
+    if (! mGateOpen) return;
+
+    const float a = mA, gate = mGate;
+    const float spread = juce::jlimit (0.0f, 1.0f, p.panSpread);
+    const double transpose = std::pow (2.0, p.pitch / 12.0);
+    auto ratioOf = [&p] (float semis) { return std::pow (2.0, (semis + p.pitch) / 12.0); };
+
+    switch (p.mode)
+    {
+        case Arp:
+        {
+            // Re-plays your last note as an arpeggio: up / up-down / random as CHAOS rises.
+            int idx;
+            if (a < 0.34f)      idx = k % 4;
+            else if (a < 0.67f) { static const int ud[8] = { 0, 1, 2, 3, 4, 3, 2, 1 }; idx = ud[k % 8]; }
+            else
+            {
+                if (rand01() < 0.15f) return;           // rests
+                idx = (int) (rand01() * 6.0f);
+            }
+            const int len = (int) juce::jmax (0.02 * sr, gate * mStep);
+            const float pan = 0.5f + ((k % 2) ? 0.3f : -0.3f) * spread;
+            schedule (0, recentStart(), ratioOf (modeSemis (idx, p.scale)), len, false, pan, 0.85f, 0.08f);
+            break;
+        }
+
+        case Kaleido:
+        {
+            // Loops from the last two bars at different speeds, layered.
+            if (rand01() > 0.5f + 0.5f * a) return;
+            const float r = rand01();
+            double speed = r < 0.35f ? 1.0 : r < 0.55f ? 0.5 : r < 0.75f ? 2.0 : r < 0.9f ? -1.0 : -0.5;
+            if (a < 0.3f && speed < 0.0) speed = 1.0;
+            const double back = (1.0 + std::floor (rand01() * 7.0)) * mBeat * 0.5;
+            const int len = (int) (mBeat * (0.5 + gate));
+            schedule (0, (double) writeHead - back, std::abs (speed) * transpose, len, speed < 0.0,
+                      0.5f + randBi() * 0.45f * spread, 0.6f, 0.15f);
+            break;
+        }
+
+        case Shuffle:
+        {
+            // The last bar, cut into steps and replayed in a new order.
+            if (barMarkPrev < 0.0) return;
+            int j = k;
+            if (rand01() < a) j = (int) (rand01() * (float) spb);
+            if (rand01() < a * 0.2f) j = lastSlice;
+            lastSlice = j;
+            const bool rev = rand01() < a * 0.3f;
+            const int len = (int) (mStep * juce::jmax (0.3f, gate)) + 64;
+            schedule (0, barMarkPrev + j * mStep, transpose, len, rev, 0.5f + randBi() * 0.2f * spread, 0.9f, 0.04f);
+            break;
+        }
+
+        case Bend:
+        {
+            // Long loops of what you played whose pitch glides up or down.
+            if (k % 2 != 0) return;
+            const float semis = (3.0f + 9.0f * a) * (rand01() < 0.5f ? 1.0f : -1.0f);
+            const int len = (int) (mStep * 2.0 * (0.6 + 0.8 * gate));
+            const double incMul = std::pow (2.0, semis / 12.0 / len);
+            schedule (0, recentStart(), transpose, len, false, 0.5f + randBi() * 0.4f * spread, 0.8f, 0.2f, incMul);
+            break;
+        }
+
+        case Stutter:
+        {
+            // Ratchets of the last step, sometimes reversed or dropping in pitch.
+            if (rand01() > 0.25f + 0.55f * a) return;
+            const int reps = 2 + (int) (rand01() * (2.0f + 6.0f * a));
+            const bool fast = a > 0.6f && rand01() < 0.5f;
+            const int spacing = (int) (fast ? mStep * 0.5 : mStep);
+            const bool drop = rand01() < a * 0.5f;
+            const bool rev = rand01() < a * 0.2f;
+            const double start = recentStart();
+            for (int r = 0; r < reps; ++r)
+                schedule (r * spacing, start, ratioOf (drop ? -1.5f * (float) r : 0.0f),
+                          (int) (spacing * juce::jmax (0.4f, gate)), rev, 0.5f, 0.9f * std::pow (0.92f, (float) r), 0.02f);
+            break;
+        }
+
+        default: break; // Cascade / Harmony react to notes (modeOnset)
+    }
+}
+
+void GrainEngine::modeOnset (const GrainParams& p)
+{
+    const float spread = juce::jlimit (0.0f, 1.0f, p.panSpread);
+    auto ratioOf = [&p] (float semis) { return std::pow (2.0, (semis + p.pitch) / 12.0); };
+
+    if (p.mode == Cascade)
+    {
+        // Every note -> a fast harp-like run of scale notes above (or below) it.
+        nextEvent (p.lock, true);
+        const int n = 4 + (int) std::round (mA * 8.0f);
+        const int spacing = (int) (sr * (0.025 + 0.05 * mGate));
+        const bool down = mA > 0.5f && rand01() < 0.3f;
+        const int len = (int) (sr * (0.12 + 0.4 * mGate));
+        for (int j = 0; j < n; ++j)
+        {
+            const float semis = degreeSemis (down ? -(j + 1) : (j + 1), p.scale);
+            if (std::abs (semis) > 24.0f) break;
+            const float pan = 0.5f + ((j % 2) ? 1.0f : -1.0f) * 0.35f * spread * (float) (j + 1) / (float) n;
+            schedule (j * spacing, lastOnsetPos, ratioOf (semis), len, false, pan, 0.85f * std::pow (0.88f, (float) j), 0.1f);
+        }
+    }
+    else if (p.mode == Harmony)
+    {
+        // Every note -> echoes on the grid, each re-pitched to a consonant interval.
+        nextEvent (p.lock, true);
+        const int n = (int) scaleTable (p.scale).size();
+        static const int c7[] = { 2, 4, 5, 7, -3, 9 };   // 3rd, 5th, 6th, octave, 4th below, 3rd above octave
+        static const int c2[] = { 1, 2, -1, 3 };         // 5th, octave, 4th below, octave + 5th
+        static const int cx[] = { 1, 2, 3, 5, -2 };
+        const int* cands = n == 7 ? c7 : n == 2 ? c2 : cx;
+        const int count = n == 7 ? 6 : n == 2 ? 4 : 5;
+        const int echoes = 2 + (int) std::round (mA * 4.0f);
+        const int len = (int) juce::jmax (0.05 * sr, juce::jmin ((double) mGate * 2.0 * mStep, 0.6 * sr));
+        for (int e = 0; e < echoes; ++e)
+        {
+            const int deg = cands[juce::jlimit (0, count - 1, (int) (rand01() * (float) count))];
+            const float pan = 0.5f + ((e % 2) ? 0.35f : -0.35f) * spread;
+            schedule ((int) ((e + 1) * mStep * 2.0), lastOnsetPos, ratioOf (degreeSemis (deg, p.scale)), len, false,
+                      pan, 0.8f * std::pow (0.78f, (float) e), 0.08f);
+        }
     }
 }
