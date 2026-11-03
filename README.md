@@ -3,35 +3,29 @@
 A granular "chaos" sampler instrument and effect (VST3). Load a sample and it chops,
 scatters, re-pitches, reverses and re-orders it into pads, glitches, stutters and chops.
 
-![ChaosGrain instrument (left) and ChaosGrain FX (right)](docs/screenshot.png)
+![ChaosGrain instrument](docs/screenshot.png)
 
-Everything lives on one compact pixel-art "grain unit":
+The instrument lives on one compact pixel-art "grain unit" (the FX version is described below):
 
 - **Three big knobs**: **SIZE** (grain length: short = glitch, long = pads/chops), **CHAOS**
-  (one knob that scales all the randomness) and **PITCH** (instrument) or **MIX** (FX).
-- **Small knobs** along the bottom: **FILTER · RESO · SPACE** (instrument) or
-  **FILTER · SPACE · REPEAT · TIME** (FX).
-- **Small buttons** at the top: the red **HOLD** (instrument: drone without MIDI) or **FREEZE**
-  (FX), **SYNC** (lock grains to the DAW tempo; lights up when on) and **RAND** (randomize).
-- **Second row of small knobs** (both):
+  (one knob that scales all the randomness) and **PITCH**.
+- **Small knobs** along the bottom: **FILTER · RESO · SPACE**.
+- **Small buttons** at the top: the red **HOLD** (drone without MIDI), **SYNC** (lock grains to
+  the DAW tempo; lights up when on) and **RAND** (randomize).
+- **Second row of small knobs**:
   - **CHAR**: the sound's character. *Clean*; *Tape* (wow & flutter on all grains, soft
     saturation, gentle high cut: lo-fi, hip-hop); *Crystal* (about half the grains an octave or two
     up, softer edges, bigger brighter reverb: ambient, cinematic); *Dust* (12 kHz / 7-bit, vinyl
     crackle while grains play: lo-fi, trap).
   - **KEY**: Off / Major / Minor / Penta / Blues. Every grain's pitch (random pitch, PITCH knob and
-    played notes) snaps into the scale, measured from the sample's original pitch (FX: from what
-    you play), so CHAOS stays in tune.
+    played notes) snaps into the scale, measured from the sample's original pitch , so CHAOS stays in tune.
   - **SWING**: with SYNC on, every second step comes late (100% = half a step); works with the
     DAW grid and the internal clock.
   - RAND leaves CHAR, KEY and SWING alone; some presets set a character.
 - **Large / Small UI** in the right-click menu (remembered per project).
-- **LOCK** (both): the randomness repeats as a loop. Random choices run in cycles of 16 grain
+- **LOCK**: the randomness repeats as a loop. Random choices run in cycles of 16 grain
   events; LOCK keeps repeating the cycle you are hearing (with SYNC on: exactly 16 steps of the
   tempo grid, e.g. one bar at 1/16). RAND rolls a new pattern, which then repeats.
-- **FOLLOW** (FX): grains fire on the notes you play instead of on a clock. Every detected note
-  opens a short burst (at least 150 ms, about three grains long) starting on the attack; silence
-  means no grains. With LOCK on, every note gets the same burst pattern. With FREEZE on, your
-  playing triggers bursts from the frozen loop. The button blinks on each detected note.
 - The LED flickers while grains play, the green display counts active grains (and shows a knob's
   value while you turn it), and the LED row shows density.
 - **Click the screen or drop a file on it** to load a sample (instrument). **Double-click** a knob to reset it.
@@ -40,50 +34,41 @@ Everything lives on one compact pixel-art "grain unit":
 The deeper settings below (position, spray, slices, reverse...) have no knob of their own; they are
 set by the presets and RAND, and every one of them can be automated from your DAW.
 
-## FX modes
+## ChaosGrain FX: three engines, three knobs
 
-ChaosGrain FX runs one of nine **modes**, tempo-synced algorithms that turn what you play into
-something new. Pick a mode at the top of the screen: click the left half of the screen for the
-previous mode, the right half for the next (or right-click > Mode).
+![ChaosGrain FX: RESONATE, SPECTRAL, PATTERN](docs/screenshot_fx.png)
 
-| Mode | What it does with your playing |
-|---|---|
-| **ARP** | Re-plays your last note as an arpeggio (up, up-down, or random as CHAOS rises) |
-| **CASCADE** | Every note triggers a fast harp-like run of scale notes |
-| **HARMONY** | Pitched echoes on 3rds / 5ths / octaves that build countermelodies |
-| **KALEIDO** | Loops of the last bars at half, normal and double speed and reversed, layered |
-| **SHUFFLE** | The last bar cut into steps and replayed in a new order on the grid |
-| **BEND** | Loops whose pitch glides up and down |
-| **CLOUD** | Dense shimmering granular haze |
-| **STUTTER** | Rhythmic ratchets and tape-stop drops |
-| **GRAIN** | The free granular engine (all granular parameters, FOLLOW bursts) |
+The effect version is deliberately minimal: **three engine buttons** and **three knobs**. Each
+engine is a complex chain inside; the knobs are macros.
 
-In the modes: **CHAOS** = how wild (pattern, density, variation), **SIZE** = note length
-(staccato to legato), **TIME** = step length (1/4 to 1/32, follows the DAW tempo), **KEY** = the
-scale the melodic modes use (KEY off = roots, fifths and octaves only, which fit any key),
-**PITCH** (automation) transposes, **LOCK** repeats the pattern, **FOLLOW** limits continuous modes
-to the bar after you play, and **FREEZE** keeps the current material.
+| | **RESONATE** | **SPECTRAL** | **PATTERN** |
+|---|---|---|---|
+| Idea | Ghost strings & bells ringing along with you | Freeze, smear and warp the spectrum | Your playing turned into new melodies & rhythms |
+| **SHAPE** | strings -> bells -> glass -> gong | smear -> endless pad -> stretched / shifted metal | note length -> reverse & glide |
+| **CHAOS** | chord changes on the grid, extra strums, 7ths & 9ths | rhythmic spectral freezes, band shuffles, octave shimmer | harmony echoes -> arps -> cascades -> shuffle -> stutter |
+| **MIX** | dry / wet | dry / wet | dry / wet |
+
+- **Auto key**: ChaosGrain FX listens to what you play and works out the key (shown on the screen,
+  e.g. `KEY A MIN`). RESONATE tunes its strings to chords of that key and PATTERN keeps every
+  generated note in it. No key knob needed.
+- **Tempo** always follows the DAW (the grid step, 1/16 by default, is in the right-click menu).
+- **Click the screen** (or the red button) to **FREEZE**; **double-click the screen** for a new
+  variation.
+- **Right-click**: engine, time grid, freeze, lock pattern (repeat the current variation),
+  new variation, randomize knobs, UI size.
+- Each engine has its own built-in space (reverb); there is a hidden *Wet Gain* parameter for
+  automation.
 
 ## Two plugins
 
 | | **ChaosGrain** (instrument) | **ChaosGrain FX** (effect) |
 |---|---|---|
 | Goes on | an instrument / MIDI track | any audio track (guitar, synth, vocals, bus) |
-| Sound source | a loaded sample | the live input, recorded continuously (last ~10 s) |
-| Big knobs | SIZE · CHAOS · PITCH | SIZE · CHAOS · MIX |
-| Small knobs | FILTER · RESO · SPACE | FILTER · SPACE · REPEAT · TIME |
-| Red button | HOLD (drone without MIDI) | FREEZE (stop recording, keep playing the buffer) |
-| Mode buttons | LOCK | LOCK · FOLLOW |
-| Second row | CHAR · KEY · SWING | CHAR · KEY · SWING |
+| Sound source | a loaded sample | the live input |
+| Knobs | SIZE · CHAOS · PITCH + small knobs | SHAPE · CHAOS · MIX |
+| Buttons | HOLD · SYNC · RAND · LOCK | RESONATE · SPECTRAL · PATTERN + FREEZE |
 
-- **Mix** (FX): dry/wet (equal-power). Gain only affects the wet signal, so 0% is a clean bypass.
-- **Repeat** (FX): feedback. The filtered grain output is fed back into the buffer, so
-  sounds smear and build up; a soft limiter in the loop keeps it stable.
-- **Memory** (FX): how far back in time grains reach (0.1 to 8 s). Grains start from "now" by
-  default (about 10 ms behind your playing); Spray scatters them up to 0.5 s into the past.
-- **Freeze** (FX): stops recording and loops the last *Memory* seconds as a granular phrase.
-- **Filter / Reso**: resonant low-pass on the grains (inside the feedback loop in FX, so repeats get darker).
-- **Space**: reverb.
+- **Filter / Reso / Space** (instrument): resonant low-pass on the grains, and reverb.
 
 ## Using it
 

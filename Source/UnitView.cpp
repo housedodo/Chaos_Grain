@@ -124,7 +124,7 @@ namespace
                 { 'K', { 5,5,6,5,5 } }, { 'L', { 4,4,4,4,7 } }, { 'M', { 5,7,7,5,5 } }, { 'N', { 6,5,5,5,5 } }, { 'O', { 2,5,5,5,2 } },
                 { 'P', { 6,5,6,4,4 } }, { 'Q', { 2,5,5,6,3 } }, { 'R', { 6,5,6,5,5 } }, { 'S', { 3,4,2,1,6 } }, { 'T', { 7,2,2,2,2 } },
                 { 'U', { 5,5,5,5,7 } }, { 'V', { 5,5,5,5,2 } }, { 'W', { 5,5,7,7,5 } }, { 'X', { 5,5,2,5,5 } }, { 'Y', { 5,5,2,2,2 } },
-                { 'Z', { 7,1,2,4,7 } }, { ' ', { 0,0,0,0,0 } },
+                { 'Z', { 7,1,2,4,7 } }, { ' ', { 0,0,0,0,0 } }, { '#', { 5,7,5,7,5 } },
             };
             s = s.toUpperCase();
             if (centre) X -= (float) (s.length() * 4 - 1) / 2.0f;
@@ -233,6 +233,8 @@ namespace
     // Middle-right panel: LOCK (+ FOLLOW in FX)
     const juce::Rectangle<int> lockRect   { kIsFx ? 68 : 66, 94, 12, 8 };
     const juce::Rectangle<int> followRect { 96, 94, 12, 8 };
+    // FX: engine buttons under the screen
+    const juce::Rectangle<int> engineRects[3] = { { 19, 94, 12, 8 }, { 58, 94, 12, 8 }, { 97, 94, 12, 8 } };
 
     // Small push-button: grey cap, lit when on.
     void drawMiniButton (Canvas& c, juce::Rectangle<int> r, bool on, juce::Colour litColour)
@@ -247,6 +249,11 @@ namespace
 
 std::vector<UnitView::KnobSpec> UnitView::makeKnobSpecs()
 {
+    if (kIsFx)
+        return { { "shape", "SHAPE", 24.0f, 132.0f, 9.0f,  false, false },
+                 { "chaos", "CHAOS", 64.0f, 133.0f, 15.0f, true,  false },
+                 { "mix",   "MIX",   104.0f, 132.0f, 9.0f, false, false } };
+
     std::vector<KnobSpec> k = {
         { "size",  "SIZE",  24.0f, 132.0f, 9.0f,  false, false },
         { "chaos", "CHAOS", 64.0f, 133.0f, 15.0f, true,  false },
@@ -360,6 +367,8 @@ void UnitView::refreshPeaks()
 
 void UnitView::render (juce::Image& img)
 {
+    if (kIsFx) { renderFx (img); return; }
+
     Canvas c (img);
     const double nowMs = juce::Time::getMillisecondCounterHiRes();
     const bool hold = proc.apvts.getRawParameterValue (kIsFx ? "freeze" : "hold")->load() > 0.5f;
@@ -596,9 +605,27 @@ void UnitView::paint (juce::Graphics& g)
 
 void UnitView::mouseDown (const juce::MouseEvent& e)
 {
-    if (e.mods.isPopupMenu()) { showMenu(); return; }
+    if (e.mods.isPopupMenu()) { kIsFx ? showFxMenu() : showMenu(); return; }
 
     const auto p = e.getPosition() / scale;
+    if (kIsFx)
+    {
+        auto toggle = [this] (const char* id)
+        {
+            auto* q = proc.apvts.getParameter (id);
+            q->setValueNotifyingHost (q->getValue() > 0.5f ? 0.0f : 1.0f);
+        };
+        if (powerRect.expanded (1).contains (p)) { toggle ("freeze"); return; }
+        for (int i = 0; i < 3; ++i)
+            if (engineRects[i].expanded (3).contains (p))
+            {
+                auto* eng = proc.apvts.getParameter ("engine");
+                eng->setValueNotifyingHost (eng->convertTo0to1 ((float) i));
+                return;
+            }
+        if (juce::Rectangle<int> (crtX, crtY, crtW, crtH).contains (p)) toggle ("freeze"); // double-click = variation
+        return;
+    }
     if (powerRect.expanded (1).contains (p))
     {
         auto* hold = proc.apvts.getParameter (kIsFx ? "freeze" : "hold");
@@ -644,6 +671,235 @@ void UnitView::setScale (int newScale)
     proc.apvts.state.setProperty ("uiScale", scale, nullptr);
     setSize (lowW * scale, lowH * scale);
     if (onScaleChanged) onScaleChanged();
+}
+
+void UnitView::mouseDoubleClick (const juce::MouseEvent& e)
+{
+    if (! kIsFx) return;
+    if (juce::Rectangle<int> (crtX, crtY, crtW, crtH).contains (e.getPosition() / scale))
+    {
+        // The two clicks toggled FREEZE twice (net: unchanged); now roll a new variation.
+        proc.newVariation();
+        variationFlashMs = juce::Time::getMillisecondCounterHiRes();
+    }
+}
+
+void UnitView::showFxMenu()
+{
+    juce::PopupMenu engines, times;
+    const int eng = (int) proc.apvts.getRawParameterValue ("engine")->load();
+    const auto names = ChaosGrainProcessor::engineNames();
+    for (int i = 0; i < names.size(); ++i)
+        engines.addItem (names[i], true, i == eng, [this, i]
+        {
+            auto* q = proc.apvts.getParameter ("engine");
+            q->setValueNotifyingHost (q->convertTo0to1 ((float) i));
+        });
+
+    const int rate = (int) proc.apvts.getRawParameterValue ("rate")->load();
+    const auto rates = ChaosGrainProcessor::rateNames();
+    for (int i = 0; i < rates.size(); ++i)
+        times.addItem (rates[i], true, i == rate, [this, i]
+        {
+            auto* q = proc.apvts.getParameter ("rate");
+            q->setValueNotifyingHost (q->convertTo0to1 ((float) i));
+        });
+
+    const bool lock = proc.apvts.getRawParameterValue ("lock")->load() > 0.5f;
+    const bool frozen = proc.apvts.getRawParameterValue ("freeze")->load() > 0.5f;
+
+    juce::PopupMenu m;
+    m.addSubMenu ("Engine", engines);
+    m.addSubMenu ("Time (tempo grid)", times);
+    m.addSeparator();
+    m.addItem ("Freeze", true, frozen, [this, frozen] { proc.apvts.getParameter ("freeze")->setValueNotifyingHost (frozen ? 0.0f : 1.0f); });
+    m.addItem ("Lock pattern", true, lock, [this, lock] { proc.apvts.getParameter ("lock")->setValueNotifyingHost (lock ? 0.0f : 1.0f); });
+    m.addItem ("New variation", [this] { proc.newVariation(); variationFlashMs = juce::Time::getMillisecondCounterHiRes(); });
+    m.addItem ("Randomize knobs", [this] { proc.randomize(); variationFlashMs = juce::Time::getMillisecondCounterHiRes(); });
+    m.addSeparator();
+    m.addItem ("Large UI", true, scale == 4, [this] { setScale (4); });
+    m.addItem ("Small UI", true, scale == 3, [this] { setScale (3); });
+    m.showMenuAsync (juce::PopupMenu::Options().withMousePosition());
+}
+
+void UnitView::renderFx (juce::Image& img)
+{
+    Canvas c (img);
+    const double nowMs = juce::Time::getMillisecondCounterHiRes();
+    const float t = (float) (nowMs * 0.001);
+    const bool frozen = proc.apvts.getRawParameterValue ("freeze")->load() > 0.5f;
+    const int eng = juce::jlimit (0, 2, (int) proc.apvts.getRawParameterValue ("engine")->load());
+    const float shape = proc.apvts.getRawParameterValue ("shape")->load();
+
+    // Activity (for the LED)
+    float activity = 0.0f;
+    if (eng == 0) for (auto& l : proc.resonator.uiLevel) activity = std::max (activity, l.load (std::memory_order_relaxed));
+    else if (eng == 1) for (auto& b : proc.spectral.uiBands) activity = std::max (activity, b.load (std::memory_order_relaxed) * 50.0f);
+    else activity = proc.engine.uiActiveGrains.load (std::memory_order_relaxed) > 0 ? 1.0f : 0.0f;
+
+    // --- Casing ---
+    c.bevel (0, 0, (float) lowW, (float) lowH, col::casing, 5, true, 2);
+    for (int j = 4; j < lowH - 4; ++j)
+        for (int i = 4; i < lowW - 4; ++i)
+            if ((float) j / (float) lowH > 0.55f + bayer (i, j) * 0.6f) c.px (i, j, shade (col::casing, 0.94f));
+
+    // --- FREEZE button + activity LED + title ---
+    c.bevel ((float) powerRect.getX(), (float) powerRect.getY(), 12, 8, col::caseLo, 1, false);
+    c.bevel ((float) powerRect.getX() + 2, (float) powerRect.getY() + (frozen ? 3 : 2), 8, 4,
+             frozen ? shade (col::red, 1.25f) : col::red, 0, ! frozen);
+    drawLed (c, 24, 10, activity > 0.01f);
+    c.small ("FREEZE", 14, 17, col::label, true);
+    c.text ("CHAOS", 96, 6, col::label, true);
+    c.small ("GRAIN FX", 96, 14, col::caseDk, true);
+
+    // --- CRT ---
+    c.bevel (crtX, crtY, crtW, crtH, juce::Colour (0xff8b8a82), 4, false, 2);
+    c.chamfer (scrX - 1, scrY - 1, scrW + 2, scrH + 2, 4, col::black);
+    for (int j = 0; j < scrH; ++j)
+        for (int i = 0; i < scrW; ++i)
+        {
+            const bool cut = (i < 3 - j) || (i < 3 - (scrH - 1 - j)) || (scrW - 1 - i < 3 - j) || (scrW - 1 - i < 3 - (scrH - 1 - j));
+            if (cut) continue;
+            const float dx = ((float) i - scrW / 2.0f) / (scrW / 2.0f), dy = ((float) j - scrH / 2.0f) / (scrH / 2.0f);
+            const float d = std::min (1.0f, std::sqrt (dx * dx * 0.6f + dy * dy * 0.6f));
+            c.px (scrX + i, scrY + j, d > bayer (i, j) * 0.6f + 0.45f ? col::scrB : col::scrA);
+        }
+    for (int k = 1; k < 8; ++k)
+        for (int j = 2; j < scrH - 2; j += 2) c.px (scrX + (int) std::round ((float) k * scrW / 8.0f), scrY + j, col::grid);
+
+    if (eng == 0)
+    {
+        // Vibrating strings, one per resonator, with their note names
+        static const char* names[12] = { "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B" };
+        for (int v = 0; v < Resonator::numVoices; ++v)
+        {
+            const float lv = proc.resonator.uiLevel[(size_t) v].load (std::memory_order_relaxed);
+            const float m = proc.resonator.uiMidi[(size_t) v].load (std::memory_order_relaxed);
+            const int y0 = scrY + 13 + v * 6;
+            const int note = (int) std::lround (m);
+            c.small (juce::String (names[((note % 12) + 12) % 12]) + juce::String (note / 12 - 1), (float) scrX + 2, y0 - 2, col::glow);
+            const float amp = std::min (2.5f, lv * 25.0f);
+            const float freq = 0.25f + 0.05f * (float) v;
+            for (int x = scrX + 16; x < scrX + scrW - 3; ++x)
+            {
+                const float env = std::sin (juce::MathConstants<float>::pi * (float) (x - scrX - 16) / (float) (scrW - 19));
+                const int dy = (int) std::lround (amp * env * std::sin ((float) x * freq + t * (14.0f + 3.0f * (float) v)));
+                c.px (x, y0 + dy, amp > 0.3f ? col::phos : col::glow);
+            }
+        }
+    }
+    else if (eng == 1)
+    {
+        // Live spectrum of the processed sound
+        const int base = scrY + scrH - 10, maxH = scrH - 21;
+        for (int b = 0; b < Spectral::numBands; ++b)
+        {
+            const float v = proc.spectral.uiBands[(size_t) b].load (std::memory_order_relaxed);
+            const float db = 20.0f * std::log10 (v + 1.0e-6f);
+            const int hgt = (int) (juce::jlimit (0.0f, 1.0f, (db + 70.0f) / 60.0f) * (float) maxH);
+            const int x = scrX + 5 + b * 3;
+            for (int y = 0; y < hgt; ++y) c.rect (x, base - y, 2, 1, y == hgt - 1 ? col::phos : col::glow);
+        }
+    }
+    else
+    {
+        // PATTERN: live waveform + grains
+        const int mid = scrY + scrH / 2;
+        float pk = 0.05f;
+        for (auto& pr : peaks) pk = std::max (pk, std::max (-pr.first, pr.second));
+        const float amp = (float) scrH * 0.30f / std::min (1.0f, pk * 1.1f);
+        int prevTop = mid, prevBot = mid;
+        for (size_t k = 0; k < peaks.size(); ++k)
+        {
+            const int xx = scrX + 3 + (int) k;
+            const int top = mid - (int) std::round (peaks[k].second * amp);
+            const int bot = mid - (int) std::round (peaks[k].first * amp);
+            if (k > 0)
+            {
+                for (int y = std::min (prevTop, top); y <= std::max (prevTop, top); ++y) c.px (xx, y, col::glow);
+                for (int y = std::min (prevBot, bot); y <= std::max (prevBot, bot); ++y) c.px (xx, y, col::glow);
+            }
+            prevTop = top; prevBot = bot;
+        }
+        const int n = proc.engine.uiNumGrains.load (std::memory_order_relaxed);
+        for (int i = 0; i < n; ++i)
+        {
+            const float gp = proc.engine.uiGrainPos[(size_t) i].load (std::memory_order_relaxed);
+            const float lv = proc.engine.uiGrainLevel[(size_t) i].load (std::memory_order_relaxed);
+            if (lv < 0.05f || peaks.empty()) continue;
+            const int gx = scrX + 3 + (int) (gp * (float) peaks.size());
+            const int gy = mid + (int) (std::sin ((float) i * 2.39996f) * (float) scrH * 0.28f);
+            const int s = lv > 0.6f ? 2 : 1;
+            c.rect (gx - 1, gy - 1, s + 2, s + 2, col::glow);
+            c.rect (gx, gy, s, s, col::phos);
+        }
+    }
+
+    // Header: engine name
+    {
+        const auto name = ChaosGrainProcessor::engineNames()[eng].toUpperCase();
+        const float cx = scrX + scrW / 2.0f;
+        const int w = name.length() * 6 - 1;
+        c.rect ((int) (cx - w / 2.0f) - 3, scrY + 2, w + 6, 9, col::scrB);
+        c.text (name, cx, scrY + 3, col::phos, true);
+    }
+
+    // Footer: detected key / knob read-out / FROZEN
+    {
+        const int fy = scrY + scrH - 7;
+        juce::String footer;
+        if (nowMs - variationFlashMs < 1000.0) footer = "NEW VARIATION";
+        else if (touched >= 0 && nowMs - touchedTime < 1500.0)
+        {
+            const float v = (float) sliders[(size_t) touched]->getValue();
+            const juce::String id = knobSpecs[(size_t) touched].paramId;
+            const juce::String pct = juce::String (juce::roundToInt (v * 100.0f)) + "%";
+            if (id == "shape")
+            {
+                const char* what = eng == 0 ? (v < 0.25f ? "STRINGS" : v < 0.55f ? "BELLS" : v < 0.85f ? "GLASS" : "GONG")
+                                 : eng == 1 ? (v < 0.5f ? (v < 0.15f ? "SMEAR" : "PAD") : "WARP")
+                                            : (v < 0.6f ? "LENGTH" : "REVERSE+GLIDE");
+                footer = juce::String (what) + " " + pct;
+            }
+            else footer = (id == "chaos" ? "CHAOS " : "MIX ") + pct;
+        }
+        else
+        {
+            const int root = proc.keyDetector.uiRoot.load();
+            static const char* names[12] = { "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B" };
+            footer = root < 0 ? juce::String ("KEY --") : "KEY " + juce::String (names[root]) + (proc.keyDetector.uiMinor.load() ? " MIN" : " MAJ");
+        }
+        c.small (footer, (float) scrX + 4, fy, col::glow);
+        if (frozen && std::fmod (nowMs, 1000.0) < 650.0)
+            c.small ("FROZEN", (float) (scrX + scrW - 27), fy, col::seg);
+    }
+
+    // --- Engine buttons ---
+    c.bevel (6, 91, 116, 21, col::panel, 2, false);
+    const auto names = ChaosGrainProcessor::engineNames();
+    for (int i = 0; i < 3; ++i)
+    {
+        const bool on = i == eng;
+        drawMiniButton (c, engineRects[i], on, col::led);
+        c.small (names[i].toUpperCase(), engineRects[i].getCentreX(), 104, on ? col::black : col::label, true);
+    }
+
+    // --- Knobs ---
+    c.bevel (6, 114, 116, 50, col::panel, 3, false);
+    for (size_t i = 0; i < knobSpecs.size(); ++i)
+    {
+        const auto& k = knobSpecs[i];
+        const float v = (float) sliders[i]->valueToProportionOfLength (sliders[i]->getValue());
+        drawKnob (c, k.cx, k.cy, k.r, k.red ? col::red : col::blue, v);
+        c.text (k.label, k.cx, (int) (k.cy + k.r + (k.red ? 5 : 6)), col::label, true);
+    }
+
+    for (auto pt : { juce::Point<int> (3, 3), { lowW - 4, 3 }, { 3, lowH - 4 }, { lowW - 4, lowH - 4 } })
+    {
+        c.rect (pt.x - 1, pt.y - 1, 3, 3, col::caseDk);
+        c.rect (pt.x - 1, pt.y, 3, 1, col::caseHi);
+    }
+    juce::ignoreUnused (shape);
 }
 
 void UnitView::loadViaChooser()

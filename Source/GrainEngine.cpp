@@ -353,7 +353,7 @@ void GrainEngine::render (juce::AudioBuffer<float>& out, int startSample, int nu
 {
     // FX modes: Cloud and Grain run on the classic granular scheduler (Cloud with its
     // own settings); every other mode runs its own tempo-synced algorithm.
-    const bool modeActive = live && p.mode < Granular && p.mode != Cloud;
+    const bool modeActive = live && ((p.mode < Granular && p.mode != Cloud) || p.mode == PatternMix);
     GrainParams cloudP = p;
     if (live && p.mode == Cloud)
     {
@@ -808,9 +808,21 @@ void GrainEngine::modeStep (const GrainParams& p, juce::int64 step, const Source
     const float a = mA, gate = mGate;
     const float spread = juce::jlimit (0.0f, 1.0f, p.panSpread);
     const double transpose = std::pow (2.0, p.pitch / 12.0);
-    auto ratioOf = [&p] (float semis) { return std::pow (2.0, (semis + p.pitch) / 12.0); };
+    const bool mix = p.mode == PatternMix;
+    auto ratioOf = [&p, mix] (float semis)
+    {
+        // PATTERN: keep generated notes in the detected key (absolute, using the played note)
+        if (mix && p.scale > 0 && p.keyOffset >= 0)
+            semis = snapToScale (semis + (float) p.keyOffset, p.scale) - (float) p.keyOffset;
+        return std::pow (2.0, (semis + p.pitch) / 12.0);
+    };
+    const int m = mix ? pickPatternMode (false) : p.mode;
+    const bool rev = mix && rand01() < p.reverse;
+    double incMul = 1.0;
+    if (mix && rand01() < p.glide)
+        incMul = std::pow (2.0, (rand01() < 0.5f ? 1.0 : -1.0) * (2.0 + 3.0 * rand01()) / 12.0 / juce::jmax (1.0, gate * mStep));
 
-    switch (p.mode)
+    switch (m)
     {
         case Arp:
         {
@@ -825,7 +837,7 @@ void GrainEngine::modeStep (const GrainParams& p, juce::int64 step, const Source
             }
             const int len = (int) juce::jmax (0.02 * sr, gate * mStep);
             const float pan = 0.5f + ((k % 2) ? 0.3f : -0.3f) * spread;
-            schedule (0, recentStart(), ratioOf (modeSemis (idx, p.scale)), len, false, pan, 0.85f, 0.08f);
+            schedule (0, recentStart(), ratioOf (modeSemis (idx, p.scale)), len, rev, pan, 0.85f, 0.08f, incMul);
             break;
         }
 
@@ -891,9 +903,16 @@ void GrainEngine::modeStep (const GrainParams& p, juce::int64 step, const Source
 void GrainEngine::modeOnset (const GrainParams& p)
 {
     const float spread = juce::jlimit (0.0f, 1.0f, p.panSpread);
-    auto ratioOf = [&p] (float semis) { return std::pow (2.0, (semis + p.pitch) / 12.0); };
+    const bool mix = p.mode == PatternMix;
+    auto ratioOf = [&p, mix] (float semis)
+    {
+        if (mix && p.scale > 0 && p.keyOffset >= 0)
+            semis = snapToScale (semis + (float) p.keyOffset, p.scale) - (float) p.keyOffset;
+        return std::pow (2.0, (semis + p.pitch) / 12.0);
+    };
+    const int mode = mix ? pickPatternMode (true) : p.mode;
 
-    if (p.mode == Cascade)
+    if (mode == Cascade)
     {
         // Every note -> a fast harp-like run of scale notes above (or below) it.
         nextEvent (p.lock, true);
@@ -906,10 +925,11 @@ void GrainEngine::modeOnset (const GrainParams& p)
             const float semis = degreeSemis (down ? -(j + 1) : (j + 1), p.scale);
             if (std::abs (semis) > 24.0f) break;
             const float pan = 0.5f + ((j % 2) ? 1.0f : -1.0f) * 0.35f * spread * (float) (j + 1) / (float) n;
-            schedule (j * spacing, lastOnsetPos, ratioOf (semis), len, false, pan, 0.85f * std::pow (0.88f, (float) j), 0.1f);
+            const float amp = 0.85f * std::pow (0.88f, (float) j) * 2.0f / std::sqrt ((float) n); // overlapping notes
+            schedule (j * spacing, lastOnsetPos, ratioOf (semis), len, false, pan, amp, 0.1f);
         }
     }
-    else if (p.mode == Harmony)
+    else if (mode == Harmony)
     {
         // Every note -> echoes on the grid, each re-pitched to a consonant interval.
         nextEvent (p.lock, true);
@@ -929,4 +949,24 @@ void GrainEngine::modeOnset (const GrainParams& p)
                       pan, 0.8f * std::pow (0.78f, (float) e), 0.08f);
         }
     }
+}
+
+int GrainEngine::pickPatternMode (bool onsetDriven)
+{
+    // CHAOS walks through the algorithms: harmony echoes -> arps -> cascades ->
+    // shuffles -> stutters, blending into each other.
+    auto w = [this] (float centre) { return juce::jmax (0.0f, 1.0f - std::abs (mA - centre) / 0.3f); };
+
+    if (onsetDriven)
+    {
+        const float h = w (0.05f), c = w (0.55f);
+        if (h + c <= 0.0f) return -1;
+        return rand01() * (h + c) < h ? Harmony : Cascade;
+    }
+
+    const float ar = w (0.35f), sh = w (0.75f), st = w (0.97f);
+    const float total = ar + sh + st;
+    if (total <= 0.0f) return -1;
+    const float r = rand01() * total;
+    return r < ar ? Arp : r < ar + sh ? Shuffle : Stutter;
 }

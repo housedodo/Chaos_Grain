@@ -56,7 +56,10 @@ foreach(target ChaosGrain ChaosGrainFX)
         Source/GrainEngine.cpp
         Source/PluginProcessor.cpp
         Source/PluginEditor.cpp
-        Source/UnitView.cpp)
+        Source/UnitView.cpp
+        Source/KeyDetector.cpp
+        Source/Resonator.cpp
+        Source/Spectral.cpp)
 
     target_compile_definitions(${target} PUBLIC
         JUCE_WEB_BROWSER=0
@@ -68,6 +71,7 @@ foreach(target ChaosGrain ChaosGrainFX)
         PRIVATE
             juce::juce_audio_utils
             juce::juce_audio_formats
+            juce::juce_dsp
         PUBLIC
             juce::juce_recommended_config_flags
             juce::juce_recommended_lto_flags

@@ -59,8 +59,11 @@ struct GrainParams
                                // (relative to the original pitch / what is played)
     float swing = 0.0f;        // 0..1, delays every second synced step (1 = half a step)
 
-    // FX build: musical mode (see GrainEngine::Mode). Instrument always uses Grain.
+    // FX build: musical mode (see GrainEngine::Mode). Instrument always uses Granular.
     int   mode = 8;
+    // PATTERN engine extras
+    int   keyOffset = -1;      // played note's pitch class relative to the detected key (-1 = unknown)
+    float glide = 0.0f;        // chance of gliding notes
 };
 
 struct TransportInfo
@@ -106,7 +109,7 @@ public:
     static constexpr int patternLength = 16; // events per random cycle (LOCK repeats one)
 
     // FX modes: tempo-synced algorithms that turn what you play into new material.
-    enum Mode { Arp = 0, Cascade, Harmony, Kaleido, Shuffle, Bend, Cloud, Stutter, Granular, numModes };
+    enum Mode { Arp = 0, Cascade, Harmony, Kaleido, Shuffle, Bend, Cloud, Stutter, Granular, PatternMix, numModes };
 
     // Semitones of a scale degree (degree 0 = root; negative degrees go down).
     // scale 0 (KEY off) uses a neutral root/fifth table so it fits any key.
@@ -176,6 +179,7 @@ private:
     void modeStep (const GrainParams& p, juce::int64 step, const SourceView& src);
     void modeOnset (const GrainParams& p);
     double recentStart() const;
+    int pickPatternMode (bool onsetDriven);
     float modeSemis (int arpIndex, int scale) const;
 
     double sr = 44100.0;

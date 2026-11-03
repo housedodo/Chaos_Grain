@@ -3,6 +3,9 @@
 #include <juce_audio_processors/juce_audio_processors.h>
 #include <juce_audio_formats/juce_audio_formats.h>
 #include "GrainEngine.h"
+#include "Resonator.h"
+#include "Spectral.h"
+#include "KeyDetector.h"
 
 // Two plugins are built from this code: the instrument (sampler, MIDI) and the
 // effect "ChaosGrain FX" (processes live input). JUCE defines JucePlugin_IsSynth per target.
@@ -52,6 +55,13 @@ public:
     juce::AudioProcessorValueTreeState apvts;
     GrainEngine engine;
 
+    // FX build: the three engines + key tracking
+    Resonator resonator;
+    Spectral spectral;
+    KeyDetector keyDetector;
+    void newVariation();
+    static juce::StringArray engineNames() { return { "Resonate", "Spectral", "Pattern" }; }
+
     static juce::StringArray rateNames() { return { "1/1", "1/2", "1/4", "1/8", "1/16", "1/32", "1/8T", "1/16T" }; }
     static juce::StringArray modeNames() { return { "Arp", "Cascade", "Harmony", "Kaleido", "Shuffle", "Bend", "Cloud", "Stutter", "Grain" }; }
     static juce::StringArray characterNames() { return { "Clean", "Tape", "Crystal", "Dust" }; }
@@ -60,6 +70,10 @@ public:
 
 private:
     static BusesProperties makeBuses();
+    static juce::AudioProcessorValueTreeState::ParameterLayout createFxLayout();
+    void processFx (juce::AudioBuffer<float>& buffer, const TransportInfo& transport);
+    int lastEngine = -1, lastNotePc = -1;
+    float dryLevel = 0.0f, wetLevel = 0.0f, levelMatch = 1.0f, lastLevelMatch = 1.0f;
     static juce::AudioProcessorValueTreeState::ParameterLayout createLayout();
     void timerCallback() override; // frees old samples on the message thread
     void setParam (const juce::String& id, float value);

@@ -24,8 +24,31 @@ ChaosGrainProcessor::~ChaosGrainProcessor()
     stopTimer();
 }
 
+APVTS::ParameterLayout ChaosGrainProcessor::createFxLayout()
+{
+    using namespace juce;
+    APVTS::ParameterLayout layout;
+    auto pct = [] (const String& id, const String& name, float def)
+    {
+        return std::make_unique<AudioParameterFloat> (ParameterID { id, 1 }, name, NormalisableRange<float> (0.0f, 1.0f), def,
+            AudioParameterFloatAttributes().withStringFromValueFunction ([] (float v, int) { return String (roundToInt (v * 100.0f)) + " %"; }));
+    };
+    layout.add (std::make_unique<AudioParameterChoice> (ParameterID { "engine", 1 }, "Engine", engineNames(), 0));
+    layout.add (pct ("shape", "Shape", 0.35f));
+    layout.add (pct ("chaos", "Chaos", 0.5f));
+    layout.add (pct ("mix", "Mix", 0.5f));
+    layout.add (std::make_unique<AudioParameterBool> (ParameterID { "freeze", 1 }, "Freeze", false));
+    layout.add (std::make_unique<AudioParameterChoice> (ParameterID { "rate", 1 }, "Time", rateNames(), 4));
+    layout.add (std::make_unique<AudioParameterBool> (ParameterID { "lock", 1 }, "Lock Pattern", false));
+    layout.add (std::make_unique<AudioParameterFloat> (ParameterID { "gain", 1 }, "Wet Gain", NormalisableRange<float> (-24.0f, 12.0f, 0.1f), 0.0f,
+        AudioParameterFloatAttributes().withStringFromValueFunction ([] (float v, int) { return String (v, 1) + " dB"; })));
+    return layout;
+}
+
 APVTS::ParameterLayout ChaosGrainProcessor::createLayout()
 {
+    if (kIsFx) return createFxLayout();
+
     using namespace juce;
     APVTS::ParameterLayout layout;
 
@@ -115,6 +138,10 @@ APVTS::ParameterLayout ChaosGrainProcessor::createLayout()
 void ChaosGrainProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
 {
     engine.prepare (sampleRate);
+    resonator.prepare (sampleRate);
+    spectral.prepare (sampleRate);
+    keyDetector.prepare (sampleRate);
+    lastEngine = -1;
     dryBuffer.setSize (2, juce::jmax (1, samplesPerBlock), false, false, true);
     reverb.setSampleRate (sampleRate);
     reverb.reset();
@@ -210,6 +237,8 @@ void ChaosGrainProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::
             transport.isPlaying = pos->getIsPlaying();
         }
     }
+
+    if (kIsFx) { processFx (buffer, transport); return; }
 
     const auto params = readParams();
     const auto* src = audioSample.get();
@@ -340,8 +369,150 @@ void ChaosGrainProcessor::setParam (const juce::String& id, float value)
         p->setValueNotifyingHost (p->convertTo0to1 (value));
 }
 
+void ChaosGrainProcessor::newVariation()
+{
+    engine.requestNewPattern();
+    resonator.requestNewVoicing();
+    spectral.requestNewPattern();
+}
+
+void ChaosGrainProcessor::processFx (juce::AudioBuffer<float>& buffer, const TransportInfo& transport)
+{
+    const int n = buffer.getNumSamples(), numCh = buffer.getNumChannels();
+    auto get = [this] (const char* id) { return apvts.getRawParameterValue (id)->load(); };
+    static const double rateBeats[] = { 4.0, 2.0, 1.0, 0.5, 0.25, 0.125, 1.0 / 3.0, 1.0 / 6.0 };
+
+    const int eng = juce::jlimit (0, 2, (int) get ("engine"));
+    const float shape = get ("shape"), chaos = get ("chaos");
+    const bool freeze = get ("freeze") > 0.5f, lock = get ("lock") > 0.5f;
+    const double stepBeats = rateBeats[juce::jlimit (0, 7, (int) get ("rate"))];
+
+    const float* dl = dryBuffer.getReadPointer (0);
+    const float* dr = dryBuffer.getReadPointer (1);
+
+    // Auto key: follows what you play
+    keyDetector.push (dl, dr, n);
+    if (keyDetector.currentPitchClass() >= 0) lastNotePc = keyDetector.currentPitchClass();
+    const bool keyValid = keyDetector.isValid();
+    const int root = keyValid ? keyDetector.root() : juce::jmax (0, lastNotePc);
+    const bool minor = keyValid && keyDetector.isMinor();
+
+    if (eng != lastEngine)
+    {
+        resonator.reset();
+        spectral.reset();
+        engine.killAllGrains();
+        lastEngine = eng;
+    }
+
+    float* wl = buffer.getWritePointer (0);
+    float* wr = numCh > 1 ? buffer.getWritePointer (1) : nullptr;
+    float space = 0.3f;
+
+    if (eng == 0)
+    {
+        Resonator::Params rp;
+        rp.shape = shape; rp.chaos = chaos; rp.freeze = freeze; rp.lock = lock;
+        rp.keyRoot = root; rp.minor = minor; rp.stepBeats = stepBeats;
+        resonator.process (dl, dr, wl, wr, n, rp, transport);
+        space = 0.18f + 0.2f * shape;
+    }
+    else if (eng == 1)
+    {
+        Spectral::Params sp;
+        sp.shape = shape; sp.chaos = chaos; sp.freeze = freeze; sp.lock = lock; sp.stepBeats = stepBeats;
+        spectral.process (dl, dr, wl, wr, n, sp, transport);
+        space = 0.3f;
+    }
+    else
+    {
+        // PATTERN: the merged melodic/rhythmic modes on the live buffer
+        GrainParams p;
+        p.mode = GrainEngine::PatternMix;
+        p.chaos = chaos * 2.0f;                                   // engine activity = chaos
+        p.sizeMs = 5.0f * std::pow (400.0f, juce::jmin (1.0f, shape / 0.6f)); // note length
+        p.reverse = juce::jmax (0.0f, shape - 0.6f) * 1.2f;
+        p.glide = juce::jmax (0.0f, shape - 0.75f) * 2.4f;
+        p.panSpread = 0.7f; p.position = 1.0f; p.spray = 0.05f;
+        p.stepBeats = stepBeats; p.lock = lock; p.freeze = freeze;
+        p.repeats = 0.0f; p.memorySec = 2.0f;
+        p.scale = keyValid ? (minor ? 2 : 1) : 0;
+        p.keyOffset = (keyValid && lastNotePc >= 0) ? (lastNotePc - root + 12) % 12 : -1;
+        engine.render (buffer, 0, n, 0, nullptr, dl, dr, p, transport);
+        engine.publishUiState();
+        space = 0.25f;
+    }
+
+    // Level match: keep the processed sound near the input's loudness, so every engine
+    // sits at a similar level and MIX behaves. Only adapts while you are playing.
+    {
+        const float dryRms = 0.5f * (dryBuffer.getRMSLevel (0, 0, n) + dryBuffer.getRMSLevel (1, 0, n));
+        const float wetRms = numCh > 1 ? 0.5f * (buffer.getRMSLevel (0, 0, n) + buffer.getRMSLevel (1, 0, n)) : buffer.getRMSLevel (0, 0, n);
+        const float a = 1.0f - std::exp (-(float) n / (0.4f * (float) getSampleRate()));
+        dryLevel += (dryRms - dryLevel) * a;
+        wetLevel += (wetRms - wetLevel) * a;
+        if (! freeze && dryRms > 0.003f && dryLevel > 0.003f && wetLevel > 1.0e-5f) // only while you play
+        {
+            const float target = juce::jlimit (0.1f, 16.0f, dryLevel / wetLevel);
+            levelMatch += (target - levelMatch) * a;
+        }
+        buffer.applyGainRamp (0, n, lastLevelMatch, levelMatch);
+        lastLevelMatch = levelMatch;
+    }
+
+    // Built-in space for each engine
+    juce::Reverb::Parameters rv;
+    rv.roomSize = 0.55f + 0.44f * space;
+    rv.damping = 0.35f;
+    rv.width = 1.0f;
+    rv.wetLevel = 0.22f * space;
+    rv.dryLevel = 0.5f * (1.0f - 0.4f * space);
+    reverb.setParameters (rv);
+    if (numCh > 1) reverb.processStereo (wl, wr, n);
+    else           reverb.processMono (wl, n);
+
+    const float gain = juce::Decibels::decibelsToGain (get ("gain"));
+    buffer.applyGainRamp (0, n, lastGain, gain);
+    lastGain = gain;
+
+    for (int ch = 0; ch < numCh; ++ch)
+    {
+        auto* w = buffer.getWritePointer (ch);
+        for (int i = 0; i < n; ++i)
+        {
+            const float a = std::abs (w[i]);
+            if (a > 0.8f) w[i] = std::copysign (0.8f + 0.2f * std::tanh ((a - 0.8f) / 0.2f), w[i]);
+        }
+    }
+
+    const float mix = get ("mix");
+    const float from = lastMix < 0.0f ? mix : lastMix;
+    for (int ch = 0; ch < numCh; ++ch)
+    {
+        auto* w = buffer.getWritePointer (ch);
+        const auto* d = dryBuffer.getReadPointer (juce::jmin (ch, 1));
+        for (int i = 0; i < n; ++i)
+        {
+            const float m = from + (mix - from) * (float) i / (float) n;
+            const float a = m * juce::MathConstants<float>::halfPi;
+            w[i] = d[i] * std::cos (a) + w[i] * std::sin (a);
+        }
+    }
+    lastMix = mix;
+}
+
 void ChaosGrainProcessor::randomize()
 {
+    if (kIsFx)
+    {
+        juce::Random r;
+        newVariation();
+        setParam ("shape", r.nextFloat());
+        setParam ("chaos", r.nextFloat());
+        setParam ("rate", (float) (2 + r.nextInt (4)));
+        return;
+    }
+
     engine.requestNewPattern(); // new random pattern too (also when LOCK is on)
 
     juce::Random r;

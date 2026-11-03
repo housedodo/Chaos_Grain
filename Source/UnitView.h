@@ -12,7 +12,7 @@ class UnitView : public juce::Component,
                  private juce::Timer
 {
 public:
-    static constexpr int lowW = 128, lowH = 222;
+    static constexpr int lowW = 128, lowH = kIsFx ? 170 : 222;
 
     int getScale() const { return scale; }
     std::function<void()> onScaleChanged; // editor resizes itself
@@ -23,6 +23,7 @@ public:
     void paint (juce::Graphics&) override;
     void resized() override;
     void mouseDown (const juce::MouseEvent&) override;
+    void mouseDoubleClick (const juce::MouseEvent&) override;
 
     bool isInterestedInFileDrag (const juce::StringArray& files) override;
     void filesDropped (const juce::StringArray& files, int, int) override;
@@ -44,6 +45,9 @@ private:
     void showMenu();
     void loadViaChooser();
     void render (juce::Image& img);
+    void renderFx (juce::Image& img);   // FX build: engine buttons + SHAPE / CHAOS / MIX
+    void showFxMenu();
+    double variationFlashMs = 0.0;
 
     ChaosGrainProcessor& proc;
     InvisibleKnobs invisible;
