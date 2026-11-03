@@ -228,20 +228,47 @@ namespace
     constexpr int crtX = 6, crtY = 22, crtW = 116, crtH = 66;
     constexpr int scrX = crtX + 5, scrY = crtY + 5, scrW = crtW - 10, scrH = crtH - 10;
     const juce::Rectangle<int> powerRect { 8, 7, 12, 8 };
+    const juce::Rectangle<int> syncRect { 33, 7, 12, 8 };
+    const juce::Rectangle<int> randRect { 51, 7, 12, 8 };
+
+    // Small push-button: grey cap, lit when on.
+    void drawMiniButton (Canvas& c, juce::Rectangle<int> r, bool on, juce::Colour litColour)
+    {
+        c.bevel ((float) r.getX(), (float) r.getY(), 12, 8, col::caseLo, 1, false);
+        c.bevel ((float) r.getX() + 2, (float) r.getY() + (on ? 3 : 2), 8, 4,
+                 on ? litColour : juce::Colour (0xffcfcdc3), 0, ! on);
+    }
+
+    constexpr float miniY = 176.0f, miniR = 5.0f;
 }
 
-const UnitView::KnobSpec UnitView::knobSpecs[3] = {
-    { "size",  "SIZE",  24.0f, 132.0f, 9.0f,  false },
-    { "chaos", "CHAOS", 64.0f, 133.0f, 15.0f, true  },
-    { kIsFx ? "mix" : "pitch", kIsFx ? "MIX" : "PITCH", 104.0f, 132.0f, 9.0f, false },
-};
+std::vector<UnitView::KnobSpec> UnitView::makeKnobSpecs()
+{
+    std::vector<KnobSpec> k = {
+        { "size",  "SIZE",  24.0f, 132.0f, 9.0f,  false, false },
+        { "chaos", "CHAOS", 64.0f, 133.0f, 15.0f, true,  false },
+        { kIsFx ? "mix" : "pitch", kIsFx ? "MIX" : "PITCH", 104.0f, 132.0f, 9.0f, false, false },
+    };
+
+    const std::vector<std::pair<const char*, const char*>> minis = kIsFx
+        ? std::vector<std::pair<const char*, const char*>> { { "filter", "FILTER" }, { "space", "SPACE" }, { "repeats", "REPEAT" }, { "memory", "MEMORY" } }
+        : std::vector<std::pair<const char*, const char*>> { { "filter", "FILTER" }, { "reso", "RESO" }, { "space", "SPACE" } };
+
+    for (size_t i = 0; i < minis.size(); ++i)
+    {
+        const float cx = 6.0f + 116.0f * ((float) i + 0.5f) / (float) minis.size();
+        k.push_back ({ minis[i].first, minis[i].second, std::round (cx), miniY, miniR, false, true });
+    }
+    return k;
+}
 
 //==============================================================================
 UnitView::UnitView (ChaosGrainProcessor& p) : proc (p)
 {
-    for (int i = 0; i < 3; ++i)
+    for (int i = 0; i < (int) knobSpecs.size(); ++i)
     {
-        auto& s = sliders[i];
+        sliders.push_back (std::make_unique<juce::Slider>());
+        auto& s = *sliders.back();
         s.setSliderStyle (juce::Slider::RotaryHorizontalVerticalDrag);
         s.setTextBoxStyle (juce::Slider::NoTextBox, false, 0, 0);
         s.setLookAndFeel (&invisible);
@@ -249,9 +276,9 @@ UnitView::UnitView (ChaosGrainProcessor& p) : proc (p)
         s.setPopupMenuEnabled (false);
         s.onValueChange = [this, i] { touched = i; touchedTime = juce::Time::getMillisecondCounterHiRes(); };
         addAndMakeVisible (s);
-        attachments[i] = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (proc.apvts, knobSpecs[i].paramId, s);
+        attachments.push_back (std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (proc.apvts, knobSpecs[(size_t) i].paramId, s));
 
-        if (auto* param = proc.apvts.getParameter (knobSpecs[i].paramId))
+        if (auto* param = proc.apvts.getParameter (knobSpecs[(size_t) i].paramId))
             s.setDoubleClickReturnValue (true, param->convertFrom0to1 (param->getDefaultValue()));
     }
     touched = -1;
@@ -263,16 +290,16 @@ UnitView::UnitView (ChaosGrainProcessor& p) : proc (p)
 UnitView::~UnitView()
 {
     stopTimer();
-    for (auto& s : sliders) s.setLookAndFeel (nullptr);
+    for (auto& s : sliders) s->setLookAndFeel (nullptr);
 }
 
 void UnitView::resized()
 {
-    for (int i = 0; i < 3; ++i)
+    for (size_t i = 0; i < knobSpecs.size(); ++i)
     {
         const auto& k = knobSpecs[i];
         const int r = (int) k.r + 3;
-        sliders[i].setBounds (((int) k.cx - r) * scale, ((int) k.cy - r) * scale, r * 2 * scale, r * 2 * scale);
+        sliders[i]->setBounds (((int) k.cx - r) * scale, ((int) k.cy - r) * scale, r * 2 * scale, r * 2 * scale);
     }
     refreshPeaks();
 }
@@ -333,6 +360,12 @@ void UnitView::render (juce::Image& img)
              hold ? shade (col::red, 1.25f) : col::red, 0, ! hold);
     drawLed (c, 24, 10, active > 0 && (active > 2 || std::fmod (nowMs, 200.0) < 120.0));
     c.small (kIsFx ? "FREEZE" : "HOLD", 14, 17, col::label, true);
+
+    const bool syncOn = proc.apvts.getRawParameterValue ("sync")->load() > 0.5f;
+    drawMiniButton (c, syncRect, syncOn, col::led);
+    c.small ("SYNC", syncRect.getCentreX(), 17, col::label, true);
+    drawMiniButton (c, randRect, nowMs - randFlashMs < 180.0, juce::Colour (0xffffd166));
+    c.small ("RAND", randRect.getCentreX(), 17, col::label, true);
 
     c.text ("CHAOS", 96, 6, col::label, true);
     c.small (kIsFx ? "GRAIN FX" : "GRAIN UNIT", 96, 14, col::caseDk, true);
@@ -416,8 +449,9 @@ void UnitView::render (juce::Image& img)
             const float lv = proc.engine.uiGrainLevel[(size_t) i].load (std::memory_order_relaxed);
             if (lv < 0.05f) continue;
             const int gx = scrX + 3 + (int) (gp * (float) peaks.size());
-            const int gy = mid + (int) (std::sin ((float) i * 2.39996f) * amp * 0.8f);
+            const int gy = mid + (int) (std::sin ((float) i * 2.39996f) * (float) scrH * 0.32f);
             const int s = lv > 0.6f ? 2 : 1;
+            if (gx < scrX + 2 || gx > scrX + scrW - 4) continue;
             c.rect (gx - 1, gy - 1, s + 2, s + 2, col::glow);
             c.rect (gx, gy, s, s, col::phos);
         }
@@ -434,11 +468,18 @@ void UnitView::render (juce::Image& img)
     juce::String caption = "GRAINS";
     if (touched >= 0 && nowMs - touchedTime < 1500.0)
     {
-        const float v = (float) sliders[touched].getValue();
-        if (touched == 0) { caption = v >= 1000.0f ? "SIZE S" : "SIZE MS"; readout = v >= 1000.0f ? juce::String (v / 1000.0f, 2) : juce::String (juce::roundToInt (v)); }
-        if (touched == 1) { caption = "CHAOS %"; readout = juce::String (juce::roundToInt (v * 100.0f)); }
-        if (touched == 2 && ! kIsFx) { caption = "PITCH ST"; readout = juce::String (v, 1); }
-        if (touched == 2 && kIsFx)   { caption = "MIX %"; readout = juce::String (juce::roundToInt (v * 100.0f)); }
+        const float v = (float) sliders[(size_t) touched]->getValue();
+        const juce::String id = knobSpecs[(size_t) touched].paramId;
+        auto pct = [v] { return juce::String (juce::roundToInt (v * 100.0f)); };
+        if (id == "size")    { caption = v >= 1000.0f ? "SIZE S" : "SIZE MS"; readout = v >= 1000.0f ? juce::String (v / 1000.0f, 2) : juce::String (juce::roundToInt (v)); }
+        if (id == "chaos")   { caption = "CHAOS %";   readout = pct(); }
+        if (id == "pitch")   { caption = "PITCH ST";  readout = juce::String (v, 1); }
+        if (id == "mix")     { caption = "MIX %";     readout = pct(); }
+        if (id == "filter")  { caption = "FILTER KHZ"; readout = juce::String (v / 1000.0f, 1); }
+        if (id == "reso")    { caption = "RESO %";    readout = pct(); }
+        if (id == "space")   { caption = "SPACE %";   readout = pct(); }
+        if (id == "repeats") { caption = "REPEATS %"; readout = pct(); }
+        if (id == "memory")  { caption = "MEMORY S";  readout = juce::String (v, 2); }
     }
     c.small (caption, 33, 92, col::label, true);
     c.bevel (8, 98, 50, 12, col::caseLo, 1, false);
@@ -455,12 +496,21 @@ void UnitView::render (juce::Image& img)
 
     // --- Knobs ---
     c.bevel (6, 114, 116, 50, col::panel, 3, false);
-    for (int i = 0; i < 3; ++i)
+    c.bevel (6, 166, 116, 28, col::panel, 2, false);
+    for (size_t i = 0; i < knobSpecs.size(); ++i)
     {
         const auto& k = knobSpecs[i];
-        const float v = (float) sliders[i].valueToProportionOfLength (sliders[i].getValue());
-        drawKnob (c, k.cx, k.cy, k.r, k.red ? col::red : col::blue, v);
-        c.text (k.label, k.cx, (int) (k.cy + k.r + (k.red ? 5 : 6)), col::label, true);
+        const float v = (float) sliders[i]->valueToProportionOfLength (sliders[i]->getValue());
+        if (k.mini)
+        {
+            drawKnob (c, k.cx, k.cy, k.r, juce::Colour (0xff6b6a63), v);
+            c.small (k.label, k.cx, (int) (k.cy + k.r + 5), col::label, true);
+        }
+        else
+        {
+            drawKnob (c, k.cx, k.cy, k.r, k.red ? col::red : col::blue, v);
+            c.text (k.label, k.cx, (int) (k.cy + k.r + (k.red ? 5 : 6)), col::label, true);
+        }
     }
 
     // Screws
@@ -488,6 +538,16 @@ void UnitView::mouseDown (const juce::MouseEvent& e)
     {
         auto* hold = proc.apvts.getParameter (kIsFx ? "freeze" : "hold");
         hold->setValueNotifyingHost (hold->getValue() > 0.5f ? 0.0f : 1.0f);
+    }
+    else if (syncRect.expanded (1).contains (p))
+    {
+        auto* sync = proc.apvts.getParameter ("sync");
+        sync->setValueNotifyingHost (sync->getValue() > 0.5f ? 0.0f : 1.0f);
+    }
+    else if (randRect.expanded (1).contains (p))
+    {
+        randFlashMs = juce::Time::getMillisecondCounterHiRes();
+        proc.randomize();
     }
     else if (! kIsFx && juce::Rectangle<int> (crtX, crtY, crtW, crtH).contains (p))
     {
@@ -524,8 +584,6 @@ void UnitView::showMenu()
     m.addSeparator();
     m.addItem (kIsFx ? "Freeze" : "Hold (drone)", true, hold, [this, hold, holdId] { proc.apvts.getParameter (holdId)->setValueNotifyingHost (hold ? 0.0f : 1.0f); });
     m.addItem ("Tempo sync", true, sync, [this, sync] { proc.apvts.getParameter ("sync")->setValueNotifyingHost (sync ? 0.0f : 1.0f); });
-    m.addSeparator();
-    m.addItem ("Advanced controls...", [this] { if (onShowAdvanced) onShowAdvanced(); });
 
     m.showMenuAsync (juce::PopupMenu::Options().withMousePosition());
 }

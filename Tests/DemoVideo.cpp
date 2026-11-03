@@ -29,8 +29,8 @@ namespace
         { 35.5, "PRESET",     "LUSH PAD",     { "PLAY CHORDS ON A MIDI KEYBOARD.", "EVERY NOTE GETS ITS OWN", "GRAIN CLOUD." } },
         { 47.0, "PRESET",     "STUTTER CHOPS",{ "SAMPLE CUT INTO 16 SLICES,", "JUMBLED ON THE TEMPO GRID." } },
         { 54.0, "PRESET",     "GLITCH STORM", { "TINY GRAINS, RANDOM PITCH,", "REVERSE AND STUTTER." } },
-        { 60.0, "RIGHT-CLICK","RANDOMIZE",    { "ROLL THE DICE FOR NEW SOUNDS." } },
-        { 66.5, "RIGHT-CLICK","ADVANCED",     { "EVERY PARAMETER IN ONE PANEL.", "< UNIT GOES BACK TO THE", "COMPACT VIEW." } },
+        { 60.0, "RAND BUTTON","RANDOMIZE",    { "ROLL THE DICE FOR NEW SOUNDS." } },
+        { 66.5, "SMALL KNOBS","COLOUR",       { "FILTER, RESO AND SPACE", "(REVERB) ON THE BOTTOM STRIP." } },
     };
 
     const Caption& captionAt (double t)
@@ -161,13 +161,11 @@ int main (int argc, char** argv)
             const double at = 60.5 + r * 2.0;
             if (t >= at && lastRandom < r) { lastRandom = r; proc->randomize(); setP ("sync", 0.0f); }
         }
-        if (! advanced && t >= 66.5)
+        if (t >= 66.5 && t < 71.0)
         {
-            advanced = true;
-            proc->applyPreset (2); // Frozen Shimmer
-            setP ("hold", 1.0f);
-            proc->apvts.state.setProperty ("advancedUI", true, nullptr);
-            recreateEditor();
+            if (! advanced) { advanced = true; proc->applyPreset (2); setP ("hold", 1.0f); } // Frozen Shimmer
+            setP ("filter", t < 69.0 ? sweep (t, 66.8, 68.8, 20000.0f, 700.0f, true) : sweep (t, 69.0, 70.8, 700.0f, 20000.0f, true));
+            setP ("space", sweep (t, 67.0, 70.5, 0.3f, 0.85f));
         }
         if (t >= 71.0) setP ("hold", 0.0f);
 
@@ -189,7 +187,7 @@ int main (int argc, char** argv)
 
             const auto snap = editor->createComponentSnapshot (editor->getLocalBounds(), true, 1.0f);
             juce::Rectangle<int> plugArea;
-            if (advanced)
+            if (false)
             {
                 plugArea = { 30, 105, 700, 520 };
                 g.setImageResamplingQuality (juce::Graphics::highResamplingQuality);
@@ -208,8 +206,8 @@ int main (int argc, char** argv)
             if (juce::String (cap.step).isNotEmpty())
                 retro::pixelText (g, cap.step, { cx, y, cw, 20 }, retro::pal::yellow, juce::Justification::topLeft, 2);
             y += 34;
-            retro::pixelText (g, cap.title, { cx, y, cw, 40 }, retro::pal::magenta, juce::Justification::topLeft, advanced ? 4 : 5);
-            y += advanced ? 60 : 70;
+            retro::pixelText (g, cap.title, { cx, y, cw, 40 }, retro::pal::magenta, juce::Justification::topLeft, 5);
+            y += 70;
             for (auto* line : cap.body)
             {
                 retro::pixelText (g, line, { cx, y, cw, 20 }, retro::pal::text, juce::Justification::topLeft, 2);

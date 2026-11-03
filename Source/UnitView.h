@@ -3,20 +3,19 @@
 #include <juce_gui_basics/juce_gui_basics.h>
 #include "PluginProcessor.h"
 
-// The compact "handheld unit" face: a 128x170 pixel-art device scaled up 4x,
-// with three knobs (SIZE / CHAOS / PITCH), a phosphor screen, a grain counter
-// and a density LED row. Right-click for everything else.
+// The plugin's whole UI: a 128x198 pixel-art "handheld unit" scaled up 4x, with three
+// big knobs, a strip of small knobs (filter / space / ...), HOLD|FREEZE, SYNC and RAND
+// buttons, a phosphor screen, a grain counter and a density LED row.
+// Right-click for presets and the remaining options.
 class UnitView : public juce::Component,
                  public juce::FileDragAndDropTarget,
                  private juce::Timer
 {
 public:
-    static constexpr int lowW = 128, lowH = 170, scale = 4;
+    static constexpr int lowW = 128, lowH = 198, scale = 4;
 
     explicit UnitView (ChaosGrainProcessor&);
     ~UnitView() override;
-
-    std::function<void()> onShowAdvanced;
 
     void paint (juce::Graphics&) override;
     void resized() override;
@@ -33,8 +32,9 @@ private:
         void drawRotarySlider (juce::Graphics&, int, int, int, int, float, float, float, juce::Slider&) override {}
     };
 
-    struct KnobSpec { const char* paramId; const char* label; float cx, cy, r; bool red; };
-    static const KnobSpec knobSpecs[3];
+    struct KnobSpec { const char* paramId; const char* label; float cx, cy, r; bool red; bool mini; };
+    static std::vector<KnobSpec> makeKnobSpecs();
+    const std::vector<KnobSpec> knobSpecs = makeKnobSpecs();
 
     void timerCallback() override;
     void refreshPeaks();
@@ -44,8 +44,9 @@ private:
 
     ChaosGrainProcessor& proc;
     InvisibleKnobs invisible;
-    juce::Slider sliders[3];
-    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> attachments[3];
+    std::vector<std::unique_ptr<juce::Slider>> sliders;
+    std::vector<std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment>> attachments;
+    double randFlashMs = 0.0;
 
     std::vector<std::pair<float, float>> peaks;
     int lastSampleVersion = -1;

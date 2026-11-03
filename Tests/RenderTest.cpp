@@ -94,7 +94,6 @@ int main (int argc, char** argv)
         for (int i = 0; i < (int) (sr * 3.0) / block; ++i)
             proc->processBlock (buf, midi);
 
-        if (argc > 5) proc->apvts.state.setProperty ("advancedUI", true, nullptr);
         std::unique_ptr<juce::AudioProcessorEditor> editor (proc->createEditor());
         editor->setVisible (true);
         const auto snap = editor->createComponentSnapshot (editor->getLocalBounds(), true, 2.0f);

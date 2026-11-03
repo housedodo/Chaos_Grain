@@ -239,6 +239,22 @@ void ChaosGrainProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::
     if (numCh > 1) reverb.processStereo (buffer.getWritePointer (0), buffer.getWritePointer (1), numSamples);
     else           reverb.processMono (buffer.getWritePointer (0), numSamples);
 
+    // Output gain applies to the wet (grain) signal only, so Mix 0% is a true bypass.
+    const float gain = juce::Decibels::decibelsToGain (apvts.getRawParameterValue ("gain")->load());
+    buffer.applyGainRamp (0, numSamples, lastGain, gain);
+    lastGain = gain;
+
+    // Safety: dense overlapping grains + reverb + feedback can sum hot. Transparent below -2 dB.
+    for (int ch = 0; ch < numCh; ++ch)
+    {
+        auto* w = buffer.getWritePointer (ch);
+        for (int i = 0; i < numSamples; ++i)
+        {
+            const float a = std::abs (w[i]);
+            if (a > 0.8f) w[i] = std::copysign (0.8f + 0.2f * std::tanh ((a - 0.8f) / 0.2f), w[i]);
+        }
+    }
+
     // Dry/wet (FX): equal-power crossfade, smoothed across the block
     if (kIsFx)
     {
@@ -258,9 +274,6 @@ void ChaosGrainProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::
         lastMix = mix;
     }
 
-    const float gain = juce::Decibels::decibelsToGain (apvts.getRawParameterValue ("gain")->load());
-    buffer.applyGainRamp (0, buffer.getNumSamples(), lastGain, gain);
-    lastGain = gain;
 }
 
 bool ChaosGrainProcessor::loadSample (const juce::File& file)

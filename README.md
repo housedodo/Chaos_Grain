@@ -5,21 +5,21 @@ scatters, re-pitches, reverses and re-orders it into pads, glitches, stutters an
 
 ![ChaosGrain](docs/screenshot.png)
 
-The plugin opens as a compact pixel-art "grain unit" with three knobs:
+Everything lives on one compact pixel-art "grain unit":
 
-- **SIZE**: grain length (short = glitch/texture, long = chops/pads)
-- **CHAOS**: one knob that scales all the randomness
-- **PITCH**: transpose
+- **Three big knobs**: **SIZE** (grain length: short = glitch, long = pads/chops), **CHAOS**
+  (one knob that scales all the randomness) and **PITCH** (instrument) or **MIX** (FX).
+- **Small knobs** along the bottom: **FILTER · RESO · SPACE** (instrument) or
+  **FILTER · SPACE · REPEAT · MEMORY** (FX).
+- **Small buttons** at the top: the red **HOLD** (instrument: drone without MIDI) or **FREEZE**
+  (FX), **SYNC** (lock grains to the DAW tempo; lights up when on) and **RAND** (randomize).
+- The LED flickers while grains play, the green display counts active grains (and shows a knob's
+  value while you turn it), and the LED row shows density.
+- **Click the screen or drop a file on it** to load a sample (instrument). **Double-click** a knob to reset it.
+- **Right-click** for presets.
 
-The red button is **HOLD** (drones the sample without MIDI), the LED flickers while grains play,
-the green display counts active grains (and shows a knob's value while you turn it), and the
-LED row shows density. **Click the screen or drop a file on it** to load a sample.
-**Double-click** a knob to reset it.
-
-**Right-click anywhere** for presets, randomize, tempo sync and **Advanced controls**, which opens
-the full panel with every parameter:
-
-![Advanced panel](docs/advanced.png)
+The deeper settings below (position, spray, slices, reverse...) have no knob of their own; they are
+set by the presets and RAND, and every one of them can be automated from your DAW.
 
 ## Two plugins
 
@@ -27,16 +27,14 @@ the full panel with every parameter:
 |---|---|---|
 | Goes on | an instrument / MIDI track | any audio track (guitar, synth, vocals, bus) |
 | Sound source | a loaded sample | the live input, recorded continuously (last ~10 s) |
-| Unit knobs | SIZE · CHAOS · PITCH | SIZE · CHAOS · MIX |
+| Big knobs | SIZE · CHAOS · PITCH | SIZE · CHAOS · MIX |
+| Small knobs | FILTER · RESO · SPACE | FILTER · SPACE · REPEAT · MEMORY |
 | Red button | HOLD (drone without MIDI) | FREEZE (stop recording, keep playing the buffer) |
 
-FX-only controls (Advanced panel):
-- **Mix**: dry/wet (equal-power).
-- **Repeats**: feedback. The filtered grain output is fed back into the buffer, so
+- **Mix** (FX): dry/wet (equal-power). Gain only affects the wet signal, so 0% is a clean bypass.
+- **Repeat** (FX): feedback. The filtered grain output is fed back into the buffer, so
   sounds smear and build up; a soft limiter in the loop keeps it stable.
-- **Memory**: how far back in time grains reach (0.1 to 8 s). Position 100% = most recent.
-
-Both versions also have:
+- **Memory** (FX): how far back in time grains reach (0.1 to 8 s).
 - **Filter / Reso**: resonant low-pass on the grains (inside the feedback loop in FX, so repeats get darker).
 - **Space**: reverb.
 
@@ -45,13 +43,11 @@ Both versions also have:
 1. Put it on an instrument/MIDI track in your DAW.
 2. Drop an audio file on the screen (or click the screen).
 3. Play MIDI notes (C3 / note 60 = original pitch), or press the red **HOLD** button to drone without MIDI.
-4. Right-click for presets or **Randomize** until something cool happens.
+4. Right-click for presets, or hit **RAND** until something cool happens.
 
 The bright blocks on the screen are the grains currently playing; the dotted line is the play position.
 
-### All controls (Advanced panel)
-
-### Controls
+### All parameters (presets, RAND and DAW automation)
 
 | Section | Knob | What it does |
 |---|---|---|

@@ -135,7 +135,7 @@ int main (int argc, char** argv)
         auto out = r.run (20.0);
         const float peak = out.getMagnitude (0, out.getNumSamples());
         check (finite (out), "max feedback: finite", 1.0f);
-        check (peak < 3.0f, "max feedback: bounded (peak)", peak);
+        check (peak <= 1.0f, "max feedback: bounded (peak)", peak);
         writeWav (outDir.getChildFile ("fx_max_feedback.wav"), out);
     }
 
@@ -158,11 +158,10 @@ int main (int argc, char** argv)
             {
                 r.set ("freeze", adv == 0 ? 0.0f : 1.0f);
                 r.run (2.0);
-                r.proc->apvts.state.setProperty ("advancedUI", adv == 1, nullptr);
                 std::unique_ptr<juce::AudioProcessorEditor> ed (r.proc->createEditor());
                 ed->setVisible (true);
                 const auto snap = ed->createComponentSnapshot (ed->getLocalBounds(), true, 2.0f);
-                juce::File f (juce::String (argv[3]) + (adv ? "_advanced.png" : "_unit.png"));
+                juce::File f (juce::String (argv[3]) + (adv ? "_unit_frozen.png" : "_unit.png"));
                 f.deleteFile();
                 juce::FileOutputStream os (f);
                 juce::PNGImageFormat().writeImageToStream (snap, os);
