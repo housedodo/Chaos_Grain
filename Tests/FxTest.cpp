@@ -318,7 +318,7 @@ int main (int argc, char** argv)
         juce::Random rnd (7);
         for (int i = 0; i < noiseBuf.getNumSamples(); ++i) noiseBuf.setSample (0, i, (rnd.nextFloat() * 2.0f - 1.0f) * 0.2f);
         Rig r (noiseBuf);
-        r.set ("engine", 1.0f); r.set ("mix", 1.0f); r.set ("chaos", 0.0f); r.set ("shape", tuned ? 0.5f : 0.0f);
+        r.set ("engine", 1.0f); r.set ("mix", 1.0f); r.set ("chaos", 0.0f); r.set ("shape", tuned ? 0.3f : 0.0f);
         auto out = r.run (6.0);
         // allowed notes of whatever key was detected (chromatic if none)
         auto& kd = r.proc->keyDetector;
@@ -341,12 +341,65 @@ int main (int argc, char** argv)
         juce::AudioBuffer<float> sine (1, (int) sr);
         for (int i = 0; i < sine.getNumSamples(); ++i) sine.setSample (0, i, 0.3f * std::sin (twoPi * 440.0f * (float) i / (float) sr));
         Rig r (sine);
-        r.set ("engine", 1.0f); r.set ("mix", 1.0f); r.set ("chaos", 0.0f); r.set ("shape", 1.0f);
+        r.set ("engine", 1.0f); r.set ("mix", 1.0f); r.set ("chaos", 0.0f); r.set ("shape", 0.62f); // UNISON stage
         auto out = r.run (4.0);
         const int from = (int) sr;
         const float base = goertzel (out, from, 440.0f);
         const float down = goertzel (out, from, 220.0f) / base, up = goertzel (out, from, 880.0f) / base, fifth = goertzel (out, from, 660.0f) / base;
-        check (down > 0.05f && up > 0.05f && fifth > 0.03f, "spectral: shape 1 adds octave down/up + fifth (min ratio)", juce::jmin (down, up, fifth));
+        check (down > 0.03f && up > 0.03f && fifth > 0.015f, "spectral: UNISON stage adds octave down/up + fifth (min ratio)", juce::jmin (down, up, fifth));
+    }
+    for (int uni = 0; uni < 2; ++uni)
+    {
+        // UNISON: a mono sine comes out wide (detuned copies differ left/right)
+        juce::AudioBuffer<float> sine (1, (int) sr);
+        for (int i = 0; i < sine.getNumSamples(); ++i) sine.setSample (0, i, 0.3f * std::sin (twoPi * 440.0f * (float) i / (float) sr));
+        Rig r (sine);
+        r.set ("engine", 1.0f); r.set ("mix", 1.0f); r.set ("chaos", 0.0f); r.set ("shape", uni ? 0.6f : 0.1f);
+        auto out = r.run (4.0);
+        double lr = 0.0, ll = 0.0, rr = 0.0;
+        for (int i = (int) sr; i < out.getNumSamples(); ++i)
+        {
+            const double a = out.getSample (0, i), b = out.getSample (1, i);
+            lr += a * b; ll += a * a; rr += b * b;
+        }
+        const float corr = (float) (lr / std::sqrt (ll * rr + 1.0e-12));
+        if (uni) check (corr < 0.9f, "spectral: UNISON makes a mono note wide (L/R corr)", corr);
+        else     check (corr > 0.97f, "spectral: below UNISON stays centred (L/R corr)", corr);
+    }
+    {
+        // RAINBOW: a short low+high burst - the high band comes out later than the low band
+        juce::AudioBuffer<float> burst (1, (int) (sr * 3.0));
+        burst.clear();
+        for (int i = 0; i < (int) (0.08 * sr); ++i)
+        {
+            const float tt = (float) i / (float) sr, env = std::sin (juce::MathConstants<float>::pi * tt / 0.08f);
+            burst.setSample (0, i, 0.3f * env * (std::sin (twoPi * 300.0f * tt) + std::sin (twoPi * 3000.0f * tt)));
+        }
+        float centroidGap = 0.0f, echoGain = 0.0f;
+        float tails[2] {};
+        for (int rain = 0; rain < 2; ++rain)
+        {
+            Rig r (burst);
+            r.set ("engine", 1.0f); r.set ("mix", 1.0f); r.set ("chaos", 0.0f); r.set ("shape", rain ? 0.9f : 0.3f);
+            auto out = r.run (2.5);
+            if (rain)
+            {
+                double tl = 0.0, el = 0.0, th = 0.0, eh = 0.0;
+                const int win = (int) (0.01 * sr);
+                for (int s0 = 0; s0 + win < out.getNumSamples(); s0 += win)
+                {
+                    juce::AudioBuffer<float> seg (2, win);
+                    for (int ch = 0; ch < 2; ++ch) seg.copyFrom (ch, 0, out, ch, s0, win);
+                    const double lo = goertzel (seg, 0, 300.0f), hi = goertzel (seg, 0, 3000.0f), tt = (double) s0 / sr;
+                    tl += tt * lo; el += lo; th += tt * hi; eh += hi;
+                }
+                centroidGap = (float) (th / juce::jmax (1.0e-12, eh) - tl / juce::jmax (1.0e-12, el));
+            }
+            tails[rain] = rms (out, 0.4, 1.5);
+        }
+        echoGain = tails[1] / juce::jmax (1.0e-6f, tails[0]);
+        check (centroidGap > 0.08f, "spectral: RAINBOW - highs echo later than lows (s)", centroidGap);
+        check (echoGain > 3.0f, "spectral: RAINBOW - echo tail vs no rainbow (ratio)", echoGain);
     }
 
     // 6. PATTERN: creates pitches that were not played

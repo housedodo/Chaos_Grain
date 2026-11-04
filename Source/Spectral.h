@@ -5,17 +5,21 @@
 #include <array>
 #include <atomic>
 
-// SPECTRAL engine: a phase-vocoder harmoniser.
-//  SHAPE 0..0.5 : TUNE - frequencies near notes of the detected key are boosted and ring on,
-//                 everything in between is pulled down -> resonant, in-key, "singing" peaks
-//  SHAPE 0.5..1 : HARMONICS - adds copies an octave down, an octave up and a fifth up
-//  CHAOS        : slow, smooth motion - the emphasis drifts across the scale and the
-//                 harmonic layers swell in turn over the bars (no stutter)
+// SPECTRAL engine: phase-vocoder harmoniser, unison and rainbow delay. SHAPE travels
+// through three stages, each adding to the last:
+//  0..0.3    TUNE    - frequencies near notes of the detected key ring, the rest is pulled down
+//  0.25..0.65 UNISON - every partial gets detuned copies (different left/right: a wide
+//                      supersaw wall) plus octave-down / octave-up / fifth layers
+//  0.6..1    RAINBOW - spectral delay: lows echo early, highs later, with feedback; near the
+//                      top every repeat climbs an octave (shimmer cascade)
+//  CHAOS: slow drift of emphasis, harmonic swells and unison detune; the rainbow's band
+//         timing reshuffles on the beat (repeatable with LOCK)
 class Spectral
 {
 public:
     static constexpr int order = 11, N = 1 << order, hop = N / 4, bins = N / 2 + 1;
-    static constexpr int numBands = 32, numLayers = 3;
+    static constexpr int numBands = 32, numLayers = 5; // 3 harmonic + 2 unison
+    static constexpr int maxEchoFrames = 64, numEchoBands = 24;
 
     struct Params
     {
@@ -40,6 +44,7 @@ private:
         std::array<float, N> in {}, out {};
         std::array<float, bins> lastPhase {}, hold {}, holdFreq {}, acc {};
         std::array<std::array<float, bins>, numLayers> layerAcc {};
+        std::vector<float> echo;   // rainbow delay: maxEchoFrames frames of complex bins
     };
 
     void processFrame (Channel& c, int chIndex, const Params& p);
@@ -55,5 +60,9 @@ private:
     double barPos = 0.0;          // continuous bar position (for slow motion)
     float motionOffset = 0.0f;    // changes with "new variation"
     std::atomic<bool> newPattern { false };
-    juce::Random rng;
+    juce::Random rng, seeds, patternRng;
+    juce::int64 seed = 1;
+    int echoPos = 0;
+    long long lastBeat = -1;
+    std::array<float, numEchoBands> bandOffset {};
 };

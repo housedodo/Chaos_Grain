@@ -859,7 +859,7 @@ void UnitView::renderFx (juce::Image& img)
             if (id == "shape")
             {
                 const char* what = eng == 0 ? (v < 0.3f ? "ECHO" : v < 0.65f ? "SUSTAIN" : "SWELL+SHIMMER")
-                                 : eng == 1 ? (v < 0.5f ? "TUNE" : "HARMONICS")
+                                 : eng == 1 ? (v < 0.28f ? "TUNE" : v < 0.62f ? "UNISON" : "RAINBOW")
                                             : (v < 0.6f ? "LENGTH" : "REVERSE+GLIDE");
                 footer = juce::String (what) + " " + pct;
             }

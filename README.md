@@ -44,8 +44,8 @@ engine is a complex chain inside; the knobs are macros.
 | | **RESONATE** | **SPECTRAL** | **PATTERN** |
 |---|---|---|---|
 | Idea | Your own notes ring on: resonators tune to the notes you play, fed by your sound, with sympathetic strings (warm sub octave, fifth in key, octave up) and a BLOOM that swells when you let go | A harmoniser working on the frequencies of your sound | Your playing turned into new melodies & rhythms |
-| **SHAPE** | size: short echo -> long sustain -> endless, wide, warm ambient pad (deeper bloom, darker ring, bigger space) | TUNE (frequencies pulled to the key, resonant peaks) -> HARMONICS (octave down / up, fifth) | note length -> reverse & glide |
-| **CHAOS** | slow detune drift (chorus) + re-plucks of your last notes on the beat | slow, smooth emphasis drifting across the scale; harmonic layers swell in turn | harmony echoes -> arps -> cascades -> shuffle -> stutter |
+| **SHAPE** | size: short echo -> long sustain -> endless, wide, warm ambient pad (deeper bloom, darker ring, bigger space) | TUNE (frequencies pulled to the key) -> UNISON (detuned copies + octaves/fifth: wide supersaw wall) -> RAINBOW DELAY (lows echo early, highs late; repeats climb an octave near the top) | note length -> reverse & glide |
+| **CHAOS** | slow detune drift (chorus) + re-plucks of your last notes on the beat | slow drift of emphasis, harmonic swells and unison detune; rainbow band timing reshuffles on the beat | harmony echoes -> arps -> cascades -> shuffle -> stutter |
 | **MIX** | dry / wet | dry / wet | dry / wet |
 
 Play a saw chord into RESONATE and you get exactly that chord back, ringing and blooming; into

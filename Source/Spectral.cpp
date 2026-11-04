@@ -29,7 +29,11 @@ void Spectral::reset()
         c.in.fill (0.0f); c.out.fill (0.0f);
         c.lastPhase.fill (0.0f); c.hold.fill (0.0f); c.holdFreq.fill (0.0f); c.acc.fill (0.0f);
         for (auto& l : c.layerAcc) l.fill (0.0f);
+        c.echo.assign ((size_t) maxEchoFrames * bins * 2, 0.0f);
     }
+    echoPos = 0;
+    lastBeat = -1;
+    bandOffset.fill (0.0f);
     pos = sinceHop = 0;
     barPos = 0.0;
 }
@@ -37,11 +41,31 @@ void Spectral::reset()
 void Spectral::process (const float* inL, const float* inR, float* outL, float* outR, int n,
                         const Params& p, const TransportInfo& t)
 {
-    if (newPattern.exchange (false)) motionOffset = rng.nextFloat();
+    if (newPattern.exchange (false)) // "new variation": new motion and a new rainbow pattern
+    {
+        motionOffset = rng.nextFloat();
+        seed = seeds.nextInt64();
+        patternRng.setSeed (seed);
+    }
 
     const double bpm = t.bpm > 0.0 ? t.bpm : 120.0;
     if (t.isPlaying) barPos = t.ppqAtBlockStart / 4.0;
     const double barPerSample = bpm / 60.0 / sr / 4.0;
+
+    // Rainbow: the band timing reshuffles on every beat (16-beat cycles, repeatable with LOCK)
+    {
+        const auto beat = (long long) std::floor (barPos * 4.0);
+        if (beat != lastBeat)
+        {
+            lastBeat = beat;
+            if (((beat % 16) + 16) % 16 == 0)
+            {
+                if (! p.lock) seed = seeds.nextInt64();
+                patternRng.setSeed (seed);
+            }
+            for (auto& o : bandOffset) o = patternRng.nextFloat();
+        }
+    }
 
     for (int i = 0; i < n; ++i)
     {
@@ -86,8 +110,10 @@ void Spectral::processFrame (Channel& c, int chIndex, const Params& p)
         c.lastPhase[(size_t) k] = phase[(size_t) k];
     }
 
-    const float sTune = juce::jlimit (0.0f, 1.0f, p.shape / 0.5f);
-    const float sHarm = juce::jlimit (0.0f, 1.0f, (p.shape - 0.5f) / 0.5f);
+    const float sTune = juce::jlimit (0.0f, 1.0f, p.shape / 0.3f);
+    const float sUni = juce::jlimit (0.0f, 1.0f, (p.shape - 0.25f) / 0.4f);
+    const float sRain = juce::jlimit (0.0f, 1.0f, (p.shape - 0.6f) / 0.4f);
+    const float sHarm = 0.85f * sUni;
     const float chaos = juce::jlimit (0.0f, 1.0f, p.chaos);
 
     // --- Key-tuned resonance mask ---
@@ -146,15 +172,20 @@ void Spectral::processFrame (Channel& c, int chIndex, const Params& p)
         im[(size_t) k] = c.hold[(size_t) k] * std::sin (c.acc[(size_t) k]);
     }
 
-    // --- Harmonic layers: octave down, octave up, fifth up ---
-    if (sHarm > 0.0f)
+    // --- Layers: octave down, octave up, fifth up (harmonics) + two detuned unison copies ---
+    if (sUni > 0.0f)
     {
-        static const float ratios[numLayers] = { 0.5f, 2.0f, 1.5f };
-        static const float gains[numLayers]  = { 0.7f, 0.45f, 0.35f };
+        // Unison detune (cents), mirrored between left and right for width, drifting with CHAOS
+        const float detune = (6.0f + 22.0f * sUni) * (1.0f + 0.35f * chaos * std::sin (twoPi * (float) (barPos / 2.0 + motionOffset)));
+        const float side = chIndex == 0 ? 1.0f : -1.0f;
+        const float ratios[numLayers] = { 0.5f, 2.0f, 1.5f,
+                                          std::pow (2.0f, side * detune / 1200.0f), std::pow (2.0f, -side * 0.5f * detune / 1200.0f) };
+        static const float gains[numLayers] = { 0.7f, 0.45f, 0.35f, 0.75f, 0.6f };
         for (int l = 0; l < numLayers; ++l)
         {
-            const float swell = 1.0f + chaos * 0.6f * std::sin (twoPi * (float) (barPos / 8.0 + motionOffset) + (float) l * twoPi / 3.0f);
-            const float g = sHarm * gains[l] * swell;
+            const bool unison = l >= 3;
+            const float swell = unison ? 1.0f : 1.0f + chaos * 0.6f * std::sin (twoPi * (float) (barPos / 8.0 + motionOffset) + (float) l * twoPi / 3.0f);
+            const float g = (unison ? sUni : sHarm) * gains[l] * swell;
             lMag.fill (0.0f);
             for (int k = 1; k < bins - 1; ++k)
             {
@@ -177,6 +208,48 @@ void Spectral::processFrame (Channel& c, int chIndex, const Params& p)
             }
         }
     }
+
+    // --- Rainbow delay: per-band echo times (lows early, highs late) with feedback ---
+    if (sRain > 0.0f)
+    {
+        const float maxDelay = 8.0f + 48.0f * sRain;              // frames (~10.7 ms each at 48 kHz)
+        const float fb = 0.35f + 0.35f * sRain;
+        const float climb = juce::jlimit (0.0f, 1.0f, (sRain - 0.6f) / 0.4f) * 0.55f; // octave-up repeats
+        const float mixEcho = 0.9f * sRain;
+        const float logBins = std::log ((float) bins);
+        float* echoBase = c.echo.data();
+        auto frameAt = [&] (int back) { return echoBase + (size_t) (((echoPos - back) % maxEchoFrames + maxEchoFrames) % maxEchoFrames) * bins * 2; };
+        float* writeFrame = frameAt (0);
+
+        for (int k = 1; k < bins - 1; ++k)
+        {
+            const float position = std::log ((float) k) / logBins;  // 0 = low, 1 = high
+            const int band = juce::jlimit (0, numEchoBands - 1, (int) (position * numEchoBands));
+            const float pos01 = juce::jlimit (0.0f, 1.0f, position * (1.0f - chaos * 0.6f) + bandOffset[(size_t) band] * chaos * 0.6f);
+            const int d = juce::jlimit (1, maxEchoFrames - 1, 1 + (int) std::lround (pos01 * maxDelay));
+            const float* echoFrame = frameAt (d);
+            const float er = echoFrame[2 * k], ei = echoFrame[2 * k + 1];
+
+            // feedback (with part of each repeat climbing an octave: phase doubles with frequency)
+            float wr = re[(size_t) k] + fb * (1.0f - climb) * er;
+            float wi = im[(size_t) k] + fb * (1.0f - climb) * ei;
+            if (climb > 0.0f && (k & 1) == 0)
+            {
+                const float* src = echoFrame + 2 * (k / 2);
+                const float m = std::sqrt (src[0] * src[0] + src[1] * src[1]);
+                const float ph = 2.0f * std::atan2 (src[1], src[0]);
+                wr += fb * climb * m * std::cos (ph);
+                wi += fb * climb * m * std::sin (ph);
+            }
+            writeFrame[2 * k] = wr;
+            writeFrame[2 * k + 1] = wi;
+
+            re[(size_t) k] = re[(size_t) k] * (1.0f - 0.35f * sRain) + mixEcho * er;
+            im[(size_t) k] = im[(size_t) k] * (1.0f - 0.35f * sRain) + mixEcho * ei;
+        }
+        if (chIndex == 1) echoPos = (echoPos + 1) % maxEchoFrames;
+    }
+    else if (chIndex == 1) echoPos = (echoPos + 1) % maxEchoFrames;
 
     // --- Synthesis ---
     for (int k = 0; k < bins; ++k)
