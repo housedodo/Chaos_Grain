@@ -60,7 +60,7 @@ public:
     Spectral spectral;
     KeyDetector keyDetector;
     void newVariation();
-    static juce::StringArray engineNames() { return { "Resonate", "Spectral", "Pattern" }; }
+    static juce::StringArray engineNames() { return { "Resonate", "Spectral" }; }
 
     static juce::StringArray rateNames() { return { "1/1", "1/2", "1/4", "1/8", "1/16", "1/32", "1/8T", "1/16T" }; }
     static juce::StringArray modeNames() { return { "Arp", "Cascade", "Harmony", "Kaleido", "Shuffle", "Bend", "Cloud", "Stutter", "Grain" }; }

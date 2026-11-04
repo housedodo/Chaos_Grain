@@ -234,7 +234,7 @@ namespace
     const juce::Rectangle<int> lockRect   { kIsFx ? 68 : 66, 94, 12, 8 };
     const juce::Rectangle<int> followRect { 96, 94, 12, 8 };
     // FX: engine buttons under the screen
-    const juce::Rectangle<int> engineRects[3] = { { 19, 94, 12, 8 }, { 58, 94, 12, 8 }, { 97, 94, 12, 8 } };
+    const juce::Rectangle<int> engineRects[2] = { { 32, 94, 12, 8 }, { 84, 94, 12, 8 } };
 
     // Small push-button: grey cap, lit when on.
     void drawMiniButton (Canvas& c, juce::Rectangle<int> r, bool on, juce::Colour litColour)
@@ -616,7 +616,7 @@ void UnitView::mouseDown (const juce::MouseEvent& e)
             q->setValueNotifyingHost (q->getValue() > 0.5f ? 0.0f : 1.0f);
         };
         if (powerRect.expanded (1).contains (p)) { toggle ("freeze"); return; }
-        for (int i = 0; i < 3; ++i)
+        for (int i = 0; i < 2; ++i)
             if (engineRects[i].expanded (3).contains (p))
             {
                 auto* eng = proc.apvts.getParameter ("engine");
@@ -728,14 +728,13 @@ void UnitView::renderFx (juce::Image& img)
     const double nowMs = juce::Time::getMillisecondCounterHiRes();
     const float t = (float) (nowMs * 0.001);
     const bool frozen = proc.apvts.getRawParameterValue ("freeze")->load() > 0.5f;
-    const int eng = juce::jlimit (0, 2, (int) proc.apvts.getRawParameterValue ("engine")->load());
+    const int eng = juce::jlimit (0, 1, (int) proc.apvts.getRawParameterValue ("engine")->load());
     const float shape = proc.apvts.getRawParameterValue ("shape")->load();
 
     // Activity (for the LED)
     float activity = 0.0f;
     if (eng == 0) for (auto& l : proc.resonator.uiLevel) activity = std::max (activity, l.load (std::memory_order_relaxed));
-    else if (eng == 1) for (auto& b : proc.spectral.uiBands) activity = std::max (activity, b.load (std::memory_order_relaxed) * 50.0f);
-    else activity = proc.engine.uiActiveGrains.load (std::memory_order_relaxed) > 0 ? 1.0f : 0.0f;
+    else for (auto& b : proc.spectral.uiBands) activity = std::max (activity, b.load (std::memory_order_relaxed) * 50.0f);
 
     // --- Casing ---
     c.bevel (0, 0, (float) lowW, (float) lowH, col::casing, 5, true, 2);
@@ -789,7 +788,7 @@ void UnitView::renderFx (juce::Image& img)
             }
         }
     }
-    else if (eng == 1)
+    else
     {
         // Live spectrum of the processed sound
         const int base = scrY + scrH - 10, maxH = scrH - 21;
@@ -800,40 +799,6 @@ void UnitView::renderFx (juce::Image& img)
             const int hgt = (int) (juce::jlimit (0.0f, 1.0f, (db + 70.0f) / 60.0f) * (float) maxH);
             const int x = scrX + 5 + b * 3;
             for (int y = 0; y < hgt; ++y) c.rect (x, base - y, 2, 1, y == hgt - 1 ? col::phos : col::glow);
-        }
-    }
-    else
-    {
-        // PATTERN: live waveform + grains
-        proc.engine.getLivePeaks (peaks, scrW - 6);
-        const int mid = scrY + scrH / 2;
-        float pk = 0.05f;
-        for (auto& pr : peaks) pk = std::max (pk, std::max (-pr.first, pr.second));
-        const float amp = (float) scrH * 0.30f / std::min (1.0f, pk * 1.1f);
-        int prevTop = mid, prevBot = mid;
-        for (size_t k = 0; k < peaks.size(); ++k)
-        {
-            const int xx = scrX + 3 + (int) k;
-            const int top = mid - (int) std::round (peaks[k].second * amp);
-            const int bot = mid - (int) std::round (peaks[k].first * amp);
-            if (k > 0)
-            {
-                for (int y = std::min (prevTop, top); y <= std::max (prevTop, top); ++y) c.px (xx, y, col::glow);
-                for (int y = std::min (prevBot, bot); y <= std::max (prevBot, bot); ++y) c.px (xx, y, col::glow);
-            }
-            prevTop = top; prevBot = bot;
-        }
-        const int n = proc.engine.uiNumGrains.load (std::memory_order_relaxed);
-        for (int i = 0; i < n; ++i)
-        {
-            const float gp = proc.engine.uiGrainPos[(size_t) i].load (std::memory_order_relaxed);
-            const float lv = proc.engine.uiGrainLevel[(size_t) i].load (std::memory_order_relaxed);
-            if (lv < 0.05f || peaks.empty()) continue;
-            const int gx = scrX + 3 + (int) (gp * (float) peaks.size());
-            const int gy = mid + (int) (std::sin ((float) i * 2.39996f) * (float) scrH * 0.28f);
-            const int s = lv > 0.6f ? 2 : 1;
-            c.rect (gx - 1, gy - 1, s + 2, s + 2, col::glow);
-            c.rect (gx, gy, s, s, col::phos);
         }
     }
 
@@ -858,9 +823,8 @@ void UnitView::renderFx (juce::Image& img)
             const juce::String pct = juce::String (juce::roundToInt (v * 100.0f)) + "%";
             if (id == "shape")
             {
-                const char* what = eng == 0 ? (v < 0.3f ? "ECHO" : v < 0.65f ? "SUSTAIN" : "SWELL+SHIMMER")
-                                 : eng == 1 ? (v < 0.28f ? "TUNE" : v < 0.62f ? "UNISON" : "RAINBOW")
-                                            : (v < 0.6f ? "LENGTH" : "REVERSE+GLIDE");
+                const char* what = eng == 0 ? (v < 0.3f ? "ECHO" : v < 0.65f ? "SUSTAIN" : "SWELL")
+                                 : (v < 0.28f ? "TUNE" : v < 0.62f ? "UNISON" : "RAINBOW");
                 footer = juce::String (what) + " " + pct;
             }
             else footer = (id == "chaos" ? "CHAOS " : "MIX ") + pct;
@@ -879,7 +843,7 @@ void UnitView::renderFx (juce::Image& img)
     // --- Engine buttons ---
     c.bevel (6, 91, 116, 21, col::panel, 2, false);
     const auto names = ChaosGrainProcessor::engineNames();
-    for (int i = 0; i < 3; ++i)
+    for (int i = 0; i < 2; ++i)
     {
         const bool on = i == eng;
         drawMiniButton (c, engineRects[i], on, col::led);

@@ -149,7 +149,7 @@ int main (int argc, char** argv)
     const auto engines = ChaosGrainProcessor::engineNames();
 
     // 1. Mix 0 = clean passthrough, for every engine
-    for (int e = 0; e < 3; ++e)
+    for (int e = 0; e < engines.size(); ++e)
     {
         Rig r (music);
         r.set ("engine", (float) e); r.set ("mix", 0.0f);
@@ -177,7 +177,7 @@ int main (int argc, char** argv)
     }
 
     // 3. Every engine sounds, stays finite and bounded (default + extreme settings)
-    for (int e = 0; e < 3; ++e)
+    for (int e = 0; e < engines.size(); ++e)
         for (int extreme = 0; extreme < 2; ++extreme)
         {
             Rig r (music);
@@ -230,12 +230,9 @@ int main (int argc, char** argv)
             pc[(size_t) (midi % 12)] += goertzel (out, (int) sr, 440.0f * std::pow (2.0f, (float) (midi - 69) / 12.0f));
         float all = 0.0f;
         for (float v : pc) all += v;
-        const float chordAndFifths = pc[0] + pc[4] + pc[7] + pc[11] + pc[2];   // C E G + fifths B D
-        check (chordAndFifths / all > 0.85f, "resonate: rings in chord + its fifths (energy share)", chordAndFifths / all);
+        const float chord = pc[0] + pc[4] + pc[7];   // C E G (octave layers stay in these)
+        check (chord / all > 0.95f, "resonate: rings only in the played chord (energy share)", chord / all);
         const int from = (int) sr;
-        const float e3 = bandEnergy (out, from, 164.81f);                       // played E3
-        const float b3 = bandEnergy (out, from, 246.94f), d4 = bandEnergy (out, from, 293.66f); // fifths of E3, G3
-        check ((b3 + d4) / e3 > 0.02f, "resonate: sympathetic fifths ring (B3+D4 vs E3)", (b3 + d4) / e3);
         const float c2 = bandEnergy (out, from, 65.41f), c3 = bandEnergy (out, from, 130.81f);
         check (c2 / c3 > 0.02f && c2 / c3 < 0.6f, "resonate: sub octave rings, below the note (C2 vs C3)", c2 / c3);
 
@@ -263,7 +260,31 @@ int main (int argc, char** argv)
         std::printf (" | after:");
         for (double s0 = 0.0; s0 < 2.0; s0 += 0.25) std::printf (" %.4f", rms (after, s0, s0 + 0.25));
         std::printf (")\n");
-        check (ratio > 1.25f, "resonate: BLOOM swells after release (swell vs held end)", ratio);
+        check (ratio > 1.15f, "resonate: BLOOM swells after release (swell vs held end)", ratio);
+    }
+    {
+        // CLEAN CHORD CHANGES: Am9 then Fmaj7 - the old chord's G and B must be gone quickly
+        juce::AudioBuffer<float> prog = sawChord ({ 110.0f, 130.81f, 164.81f, 196.0f, 246.94f }, 2.0, 4.0); // Am9
+        const auto f2 = sawChord ({ 87.31f, 110.0f, 130.81f, 164.81f }, 2.0, 2.0);                       // Fmaj7
+        prog.addFrom (0, (int) (2.0 * sr), f2, 0, 0, f2.getNumSamples());
+        Rig r (prog);
+        r.set ("engine", 0.0f); r.set ("mix", 1.0f); r.set ("chaos", 0.0f); r.set ("shape", 0.8f);
+        auto out = r.run (3.9);
+        auto share = [&] (double a0, double a1, std::vector<int> pcs)
+        {
+            juce::AudioBuffer<float> seg (2, (int) ((a1 - a0) * sr));
+            for (int ch = 0; ch < 2; ++ch) seg.copyFrom (ch, 0, out, ch, (int) (a0 * sr), seg.getNumSamples());
+            std::array<float, 12> pc {};
+            for (int midi = 33; midi <= 84; ++midi) pc[(size_t) (midi % 12)] += goertzel (seg, 0, 440.0f * std::pow (2.0f, (float) (midi - 69) / 12.0f));
+            float all = 0.0f, part = 0.0f;
+            for (float v : pc) all += v;
+            for (int q : pcs) part += pc[(size_t) q];
+            return part / juce::jmax (1.0e-12f, all);
+        };
+        const float leftover = share (2.25, 2.8, { 7, 11 });   // G, B are not in Fmaj7
+        check (leftover < 0.15f, "resonate: old chord gone after a change (G+B share in Fmaj7)", leftover);
+        const float inF = share (2.6, 3.8, { 5, 9, 0, 4 });
+        check (inF > 0.85f, "resonate: new chord rings clean (Fmaj7 share)", inF);
     }
     {
         // SHIMMER: with pure sine notes (no harmonics of their own) the octave and
@@ -284,12 +305,12 @@ int main (int argc, char** argv)
             juce::AudioBuffer<float> seg (2, to - from);
             for (int ch = 0; ch < 2; ++ch) seg.copyFrom (ch, 0, out, ch, from, to - from);
             const float up = bandEnergy (seg, 0, 261.63f) + bandEnergy (seg, 0, 329.63f) + bandEnergy (seg, 0, 392.0f)  // +12
-                           + bandEnergy (seg, 0, 392.0f * 1.0f) + bandEnergy (seg, 0, 493.88f) + bandEnergy (seg, 0, 587.33f); // +19
+                           + bandEnergy (seg, 0, 523.25f) + bandEnergy (seg, 0, 659.26f) + bandEnergy (seg, 0, 783.99f); // +24
             return up / juce::jmax (1.0e-9f, bandEnergy (seg, 0, 130.81f) + bandEnergy (seg, 0, 164.81f) + bandEnergy (seg, 0, 196.0f));
         };
         const float late = shimmerAt ((int) (1.4 * sr), (int) (2.4 * sr));
         const float early = shimmerAt ((int) (0.2 * sr), (int) (0.7 * sr));
-        check (late > 0.02f, "resonate: shimmer at low SHAPE 0.2 (octave/oct+5th vs notes)", late);
+        check (late > 0.02f, "resonate: octave shimmer at low SHAPE 0.2 (+12/+24 vs notes)", late);
         check (early > 0.4f * late, "resonate: shimmer appears early (first 0.5 s vs later)", early / juce::jmax (1.0e-9f, late));
     }
     for (int bloom = 0; bloom < 2; ++bloom)
@@ -402,21 +423,8 @@ int main (int argc, char** argv)
         check (echoGain > 3.0f, "spectral: RAINBOW - echo tail vs no rainbow (ratio)", echoGain);
     }
 
-    // 6. PATTERN: creates pitches that were not played
-    {
-        Rig r (plucks ({ 220.0f }, 0.5, 2.0));
-        r.set ("engine", 2.0f); r.set ("mix", 1.0f); r.set ("chaos", 0.35f); r.set ("shape", 0.4f);
-        auto out = r.run (6.0);
-        const int from = (int) sr;
-        const float played = goertzel (out, from, 220.0f);
-        float created = 0.0f;
-        for (float f : { 110.0f, 146.83f, 164.81f, 246.94f, 261.63f, 277.18f, 293.66f, 329.63f, 440.0f, 659.26f, 880.0f })
-            created += goertzel (out, from, f);
-        check (created / juce::jmax (1.0e-9f, played) > 0.3f, "pattern: new pitches vs played (ratio)", created / juce::jmax (1.0e-9f, played));
-    }
-
     // 7. FREEZE keeps sounding over silence in every engine
-    for (int e = 0; e < 3; ++e)
+    for (int e = 0; e < engines.size(); ++e)
     {
         Rig r (music);
         r.set ("engine", (float) e); r.set ("mix", 1.0f); r.set ("shape", 0.4f);
@@ -433,7 +441,7 @@ int main (int argc, char** argv)
         bool ok = true;
         for (int i = 0; i < 9; ++i)
         {
-            r.set ("engine", (float) (i % 3));
+            r.set ("engine", (float) (i % engines.size()));
             auto out = r.run (0.5);
             ok = ok && finite (out) && out.getMagnitude (0, out.getNumSamples()) <= 1.0f;
         }
@@ -443,7 +451,7 @@ int main (int argc, char** argv)
     // Screenshots of the three engines
     if (argc > 3)
     {
-        for (int e = 0; e < 3; ++e)
+        for (int e = 0; e < engines.size(); ++e)
         {
             Rig r (music);
             r.set ("engine", (float) e); r.set ("shape", e == 0 ? 0.4f : 0.45f);

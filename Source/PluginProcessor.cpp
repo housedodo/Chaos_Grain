@@ -15,7 +15,6 @@ ChaosGrainProcessor::ChaosGrainProcessor()
       apvts (*this, nullptr, "PARAMS", createLayout())
 {
     formatManager.registerBasicFormats();
-    if (kIsFx) engine.enableLiveInput();
     startTimer (1000);
 }
 
@@ -382,7 +381,7 @@ void ChaosGrainProcessor::processFx (juce::AudioBuffer<float>& buffer, const Tra
     auto get = [this] (const char* id) { return apvts.getRawParameterValue (id)->load(); };
     static const double rateBeats[] = { 4.0, 2.0, 1.0, 0.5, 0.25, 0.125, 1.0 / 3.0, 1.0 / 6.0 };
 
-    const int eng = juce::jlimit (0, 2, (int) get ("engine"));
+    const int eng = juce::jlimit (0, engineNames().size() - 1, (int) get ("engine"));
     const float shape = get ("shape"), chaos = get ("chaos");
     const bool freeze = get ("freeze") > 0.5f, lock = get ("lock") > 0.5f;
     const double stepBeats = rateBeats[juce::jlimit (0, 7, (int) get ("rate"))];
@@ -421,31 +420,13 @@ void ChaosGrainProcessor::processFx (juce::AudioBuffer<float>& buffer, const Tra
         resonator.process (dl, dr, wl, wr, n, rp, transport);
         space = 0.15f + 0.55f * shape; // bigger, longer space as the pad grows
     }
-    else if (eng == 1)
+    else
     {
         Spectral::Params sp;
         sp.shape = shape; sp.chaos = chaos; sp.freeze = freeze; sp.lock = lock; sp.stepBeats = stepBeats;
         sp.keyRoot = root; sp.minor = minor; sp.keyValid = keyValid;
         spectral.process (dl, dr, wl, wr, n, sp, transport);
         space = 0.3f;
-    }
-    else
-    {
-        // PATTERN: the merged melodic/rhythmic modes on the live buffer
-        GrainParams p;
-        p.mode = GrainEngine::PatternMix;
-        p.chaos = chaos * 2.0f;                                   // engine activity = chaos
-        p.sizeMs = 5.0f * std::pow (400.0f, juce::jmin (1.0f, shape / 0.6f)); // note length
-        p.reverse = juce::jmax (0.0f, shape - 0.6f) * 1.2f;
-        p.glide = juce::jmax (0.0f, shape - 0.75f) * 2.4f;
-        p.panSpread = 0.7f; p.position = 1.0f; p.spray = 0.05f;
-        p.stepBeats = stepBeats; p.lock = lock; p.freeze = freeze;
-        p.repeats = 0.0f; p.memorySec = 2.0f;
-        p.scale = keyValid ? (minor ? 2 : 1) : 0;
-        p.keyOffset = (keyValid && lastNotePc >= 0) ? (lastNotePc - root + 12) % 12 : -1;
-        engine.render (buffer, 0, n, 0, nullptr, dl, dr, p, transport);
-        engine.publishUiState();
-        space = 0.25f;
     }
 
     // Level match: keep the processed sound near the input's loudness, so every engine

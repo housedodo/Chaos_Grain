@@ -5,19 +5,21 @@
 #include <atomic>
 #include <vector>
 
-// RESONATE engine: tuned feedback resonators (Karplus-Strong style comb filters) that follow
-// the notes you play and are fed by your own sound.
-//  - every note rings as a slightly detuned left/right pair (wide, chorused)
-//  - sympathetic resonators ring along an octave below, a fifth above (in key) and an
-//    octave above, like a piano's sympathetic strings
-//  - BLOOM: the resonance ducks while you play and swells up when you let go
-//  SHAPE = size: decay time, bloom depth & rise, sympathetic amount, octave shimmer,
-//          warmth (damping) -> from a short echo to an endless, wide, warm pad
-//  CHAOS = movement: detune drift / chorus depth + re-plucks of your last notes on the beat
+// RESONATE engine: clean chord resonance.
+// Tuned feedback resonators (Karplus-Strong style comb filters) follow the notes you play and
+// are fed by your own sound, so your chord rings on in its own timbre.
+//  - two resonator banks crossfade on every chord change: the new chord gets fresh resonators,
+//    the old one is choked within ~0.25 s (no gliding, no smearing chords into each other)
+//  - layers are octaves only (always consonant): a warm sub octave, +1 and +2 octave shimmer.
+//    The shimmer is fed by a rectified copy of your sound (which contains the octave), the sub
+//    gets a soft dark nudge at each chord start.
+//  - BLOOM: the resonance sits lower while you play and swells up when you stop
+//  SHAPE = size: decay time, shimmer amount, bloom, warmth, space
+//  CHAOS = gentle movement: slow detune drift + re-plucks of your last notes on the beat
 class Resonator
 {
 public:
-    static constexpr int numVoices = 6, numSymp = 4;
+    static constexpr int numVoices = 6, numLayers = 3; // layers: sub octave, +12, +24
 
     struct Params
     {
@@ -47,33 +49,42 @@ private:
     {
         std::vector<float> buf;
         int w = 0;
-        float delay = 200.0f, target = 200.0f;
+        float delay = 200.0f;
         float lp = 0.0f, dcX = 0.0f, dcY = 0.0f;
-        float tick (float in, float g, float damp, float glide);
+        float tick (float in, float g, float damp);
         void clear();
+    };
+
+    struct Bank
+    {
+        std::array<int, numVoices> notes {};
+        int count = 0;
+        float gain = 0.0f, target = 0.0f;
+        std::array<Comb, numVoices> l, r;
+        std::array<std::array<Comb, numLayers>, numVoices> layer;
+        std::array<float, numVoices> level {};
     };
 
     void onStep (juce::int64 step, const Params& p);
     void tune (Comb& c, float midi, float t60, float& g, float dampHz) const;
 
     double sr = 44100.0;
-    std::array<Comb, numVoices> combL, combR;                       // detuned pair per note
-    std::array<std::array<Comb, numSymp>, numVoices> symp;          // octave down, fifth, octave up, octave+fifth up
-    std::array<int, numVoices> voiceNote {}, lastNote {};
-    std::array<float, numVoices> gain {}, level {}, lfo {};
+    std::array<Bank, 2> banks;
+    int active = 0;
     std::array<int, numVoices> heldNotes {};
     int numHeld = 0;
+    float lfo = 0.0f;
 
     std::array<float, 8192> hist {};
     int histPos = 0, replayPos = -1, replayStart = 0;
 
     std::vector<float> duckBuf;
     float envIn = 0.0f, envPeak = 1.0e-4f, duckGain = 1.0f;
+    float rectDc = 0.0f, subNudge = 0.0f, subLp = 0.0f;
 
     StepClock clock;
-    juce::Random seeds, patternRng, bowNoise;
+    juce::Random seeds, patternRng, nudgeNoise;
     juce::int64 seed = 1;
     std::atomic<bool> newVoicing { false };
     float hpState = 0.0f;
-    float kick = 0.0f;        // extra bowing right after new notes: sympathetic tones ring at once
 };

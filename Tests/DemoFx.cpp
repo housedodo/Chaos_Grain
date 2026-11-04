@@ -39,12 +39,12 @@ namespace
         { 34.0,  "AMBIENT",   "RAINBOW",        { "SPECTRAL, SHAPE 92%: LOWS", "ECHO FIRST, HIGHS LATER,", "REPEATS CLIMB AN OCTAVE." } },
         { 48.0,  "CHILLWAVE", "DRY KEYS",       { "ELECTRIC PIANO STABS:", "DM7 - G7 - CMAJ7 - AM7." } },
         { 53.0,  "CHILLWAVE", "WARBLE",         { "SPECTRAL UNISON, CHAOS 50%:", "DRIFTING DETUNE - THAT", "WOBBLY TAPE-CHORUS FEEL." } },
-        { 68.0,  "CHILLWAVE", "PATTERN",        { "CHAOS 35%: ARPS AND", "CASCADES OF YOUR CHORDS,", "ALWAYS IN KEY." } },
+        { 68.0,  "CHILLWAVE", "ECHO",           { "RESONATE 35%: EVERY STAB", "RINGS ON BRIEFLY IN ITS", "OWN NOTES." } },
         { 83.0,  "CHILLWAVE", "BLOOM",          { "RESONATE 65%: THE CHORD", "SWELLS UP BETWEEN THE", "STABS." } },
         { 96.0,  "GUITAR",    "DRY GUITAR",     { "CLEAN PLUCKED ARPEGGIOS:", "EM - C - G - D." } },
         { 101.0, "GUITAR",    "RAINBOW DELAY",  { "SPECTRAL 80%: EVERY NOTE", "SPLITS INTO CASCADING", "ECHOES." } },
         { 116.0, "GUITAR",    "POST-ROCK PAD",  { "RESONATE 90%: SHIMMERING", "SWELLS UNDER THE PICKING." } },
-        { 131.0, "GUITAR",    "GLITCH",         { "PATTERN, CHAOS 75%:", "SHUFFLES AND STUTTERS", "ON THE GRID." } },
+        { 131.0, "GUITAR",    "SHUFFLED RAINBOW", { "SPECTRAL 85%, CHAOS 70%:", "THE ECHO TIMING RESHUFFLES", "ON EVERY BEAT." } },
         { 143.0, "",          "FREEZE",         { "HOLD IT ALL AND FADE." } },
     };
     bool showcaseDemo = false;
@@ -271,8 +271,8 @@ int main (int argc, char** argv)
             static const Scene scenes[] = {
                 { 0.0, 0, 0.85f, 0.3f, 0.0f },   { 5.0, 0, 0.85f, 0.3f, 0.65f },  { 20.0, 1, 0.5f, 0.3f, 0.6f },
                 { 34.0, 1, 0.92f, 0.2f, 0.6f },  { 48.0, 1, 0.55f, 0.5f, 0.0f },  { 53.0, 1, 0.55f, 0.5f, 0.55f },
-                { 68.0, 2, 0.45f, 0.35f, 0.5f }, { 83.0, 0, 0.65f, 0.25f, 0.6f }, { 96.0, 1, 0.8f, 0.15f, 0.0f },
-                { 101.0, 1, 0.8f, 0.15f, 0.55f },{ 116.0, 0, 0.9f, 0.35f, 0.6f }, { 131.0, 2, 0.4f, 0.75f, 0.5f },
+                { 68.0, 0, 0.35f, 0.2f, 0.5f },  { 83.0, 0, 0.65f, 0.25f, 0.6f }, { 96.0, 1, 0.8f, 0.15f, 0.0f },
+                { 101.0, 1, 0.8f, 0.15f, 0.55f },{ 116.0, 0, 0.9f, 0.35f, 0.6f }, { 131.0, 1, 0.85f, 0.7f, 0.5f },
                 { 143.0, 0, 0.95f, 0.35f, 0.6f } };
             const Scene* sc = &scenes[0];
             const Scene* prev = &scenes[0];

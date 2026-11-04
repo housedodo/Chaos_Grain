@@ -34,26 +34,22 @@ The instrument lives on one compact pixel-art "grain unit" (the FX version is de
 The deeper settings below (position, spray, slices, reverse...) have no knob of their own; they are
 set by the presets and RAND, and every one of them can be automated from your DAW.
 
-## ChaosGrain FX: three engines, three knobs
+## ChaosGrain FX: two engines, three knobs
 
-![ChaosGrain FX: RESONATE, SPECTRAL, PATTERN](docs/screenshot_fx.png)
 
-The effect version is deliberately minimal: **three engine buttons** and **three knobs**. Each
+The effect version is deliberately minimal: **two engine buttons** and **three knobs**. Each
 engine is a complex chain inside; the knobs are macros.
 
-| | **RESONATE** | **SPECTRAL** | **PATTERN** |
-|---|---|---|---|
-| Idea | Your own notes ring on: resonators tune to the notes you play, fed by your sound, with sympathetic strings (warm sub octave, fifth in key, octave up) and a BLOOM that swells when you let go | A harmoniser working on the frequencies of your sound | Your playing turned into new melodies & rhythms |
-| **SHAPE** | size: short echo -> long sustain -> endless, wide, warm ambient pad (deeper bloom, darker ring, bigger space) | TUNE (frequencies pulled to the key) -> UNISON (detuned copies + octaves/fifth: wide supersaw wall) -> RAINBOW DELAY (lows echo early, highs late; repeats climb an octave near the top) | note length -> reverse & glide |
-| **CHAOS** | slow detune drift (chorus) + re-plucks of your last notes on the beat | slow drift of emphasis, harmonic swells and unison detune; rainbow band timing reshuffles on the beat | harmony echoes -> arps -> cascades -> shuffle -> stutter |
-| **MIX** | dry / wet | dry / wet | dry / wet |
-
-Play a saw chord into RESONATE and you get exactly that chord back, ringing and blooming; into
-SPECTRAL and it turns into a resonant, in-key chord that grows octaves and a fifth as SHAPE rises.
+| | **RESONATE** | **SPECTRAL** |
+|---|---|---|
+| Idea | Clean chord resonance: resonators tune to the notes you play and are fed by your sound. Every chord change crossfades to fresh resonators (no smearing); layers are octaves only (warm sub, +1 / +2 octave shimmer); BLOOM swells when you stop | Frequency processing of your sound |
+| **SHAPE** | size: short echo -> long sustain -> long, wide, warm pad (more shimmer, darker ring, bigger space) | TUNE (frequencies pulled to the key) -> UNISON (detuned copies + octaves/fifth: wide supersaw wall) -> RAINBOW DELAY (lows echo early, highs late; repeats climb an octave near the top) |
+| **CHAOS** | gentle detune drift + re-plucks of your last notes on the beat | slow drift of emphasis, harmonic swells and unison detune; rainbow band timing reshuffles on the beat |
+| **MIX** | dry / wet | dry / wet |
 
 - **Auto key**: ChaosGrain FX listens to what you play and works out the key (shown on the screen,
   e.g. `KEY A MIN`) and which notes you are playing (RESONATE shows them on its strings).
-  SPECTRAL tunes to the key and PATTERN keeps every generated note in it. No key knob needed.
+  SPECTRAL tunes to the key. No key knob needed.
 - **Tempo** always follows the DAW (the grid step, 1/16 by default, is in the right-click menu).
 - **Click the screen** (or the red button) to **FREEZE**; **double-click the screen** for a new
   variation.
@@ -69,7 +65,7 @@ SPECTRAL and it turns into a resonant, in-key chord that grows octaves and a fif
 | Goes on | an instrument / MIDI track | any audio track (guitar, synth, vocals, bus) |
 | Sound source | a loaded sample | the live input |
 | Knobs | SIZE · CHAOS · PITCH + small knobs | SHAPE · CHAOS · MIX |
-| Buttons | HOLD · SYNC · RAND · LOCK | RESONATE · SPECTRAL · PATTERN + FREEZE |
+| Buttons | HOLD · SYNC · RAND · LOCK | RESONATE · SPECTRAL + FREEZE |
 
 - **Filter / Reso / Space** (instrument): resonant low-pass on the grains, and reverb.
 
