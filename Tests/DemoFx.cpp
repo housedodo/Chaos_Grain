@@ -136,6 +136,147 @@ namespace
         return b;
     }
 
+    // Demo 5: TOUR - RESONATE, SPECTRAL, then EVOLVE in a song (verse / chorus / pause / verse / chorus)
+    bool tourDemo = false;
+    constexpr double tourLength = 176.0;
+    struct TourScene { double t; int engine; float shape, chaos, mix; bool freeze; };
+    const TourScene tourScenes[] = {
+        { 0.0,   0, 0.35f, 0.15f, 0.0f,  false }, { 4.0,   0, 0.35f, 0.15f, 0.6f, false }, { 14.0,  0, 0.8f, 0.2f, 0.65f, false },
+        { 26.0,  0, 0.8f,  0.55f, 0.65f, false }, { 34.0,  0, 0.8f,  0.55f, 0.65f, true },
+        { 40.0,  1, 0.2f,  0.2f,  0.0f,  false }, { 43.0,  1, 0.2f,  0.2f, 0.6f, false },  { 53.0,  1, 0.5f, 0.3f, 0.6f, false },
+        { 65.0,  1, 0.9f,  0.3f,  0.55f, false },
+        { 80.0,  2, 0.6f,  0.4f,  0.6f,  false }, { 168.0, 2, 0.6f, 0.4f, 0.6f, true } };
+    const std::vector<Caption> tourCaptions = {
+        { 0.0,   "ENGINE 1",  "RESONATE",     { "DRY FIRST: SOFT PAD CHORDS", "CMAJ7 - AM9 - FMAJ7 - G6." } },
+        { 4.0,   "SHAPE 35%", "ECHO",         { "RESONATORS TUNE TO YOUR", "CHORD AND RING ON IN ITS", "OWN SOUND. CLEAN CHANGES." } },
+        { 14.0,  "SHAPE 80%", "BLOOM PAD",    { "LONG, WARM, WIDE: SUB OCTAVE", "AND SHIMMER, SWELLING UP", "BETWEEN THE CHORDS." } },
+        { 26.0,  "CHAOS 55%", "MOVEMENT",     { "SLOW DETUNE DRIFT AND", "RE-PLUCKS ON THE BEAT." } },
+        { 34.0,  "FREEZE",    "HOLD",         { "THE PAD STAYS - PLAY", "ON TOP OF IT." } },
+        { 40.0,  "ENGINE 2",  "SPECTRAL",     { "DRY FIRST: PLUCKED GUITAR", "EM - C - G - D." } },
+        { 43.0,  "SHAPE 20%", "TUNE",         { "FREQUENCIES NEAR THE KEY", "RING, THE REST IS PULLED", "DOWN: A SINGING EDGE." } },
+        { 53.0,  "SHAPE 50%", "UNISON",       { "DETUNED COPIES LEFT/RIGHT", "PLUS OCTAVES AND A FIFTH:", "A WIDE, WARM WALL." } },
+        { 65.0,  "SHAPE 90%", "RAINBOW",      { "LOWS ECHO FIRST, HIGHS", "LATER; REPEATS CLIMB AN", "OCTAVE. CASCADES." } },
+        { 80.0,  "ENGINE 3",  "EVOLVE",       { "A SONG: QUIET VERSE (AM - F -", "DM - E). IT STARTS SMALL AND", "GROWS WHILE YOU PLAY." } },
+        { 88.0,  "NEW",       "SMART DRONE",  { "DRONE HOLDS A AS A PEDAL.", "OVER E MAJOR (G# CLASHES", "WITH A) IT MOVES TO E." } },
+        { 104.0, "SECTION B", "CHORUS",       { "LOUDER, NEW CHORDS: A NEW", "SECTION. IT GROWS ON TO", "FULL BLOOM." } },
+        { 120.0, "",          "MELODY",       { "A SINGLE-NOTE LINE", "BEFORE A PAUSE..." } },
+        { 124.0, "NEW",       "DUET",         { "IN THE PAUSE IT ANSWERS WITH", "YOUR LINE + A HARMONY (3RD", "ABOVE / 6TH BELOW), IN KEY." } },
+        { 136.0, "NEW",       "SECTION MEMORY", { "VERSE AGAIN: IT KNOWS", "SECTION A AND GOES BACK TO", "THE VERSE'S CALMER STATE." } },
+        { 152.0, "SECTION B", "CHORUS AGAIN", { "IT KNOWS THE CHORUS:", "STRAIGHT BACK TO FULL", "BLOOM." } },
+        { 168.0, "FREEZE",    "THE END",      { "RESONATE . SPECTRAL . EVOLVE", "SHAPE . CHAOS . MIX" } },
+    };
+
+    juce::AudioBuffer<float> makeTour()
+    {
+        juce::AudioBuffer<float> b (1, (int) (tourLength * sr));
+        b.clear();
+        juce::Random rnd (11);
+        auto add = [&] (int i, float v) { if (i >= 0 && i < b.getNumSamples()) b.addSample (0, i, v); };
+        auto pad = [&] (const std::vector<int>& notes, double t0, double dur, float gain)
+        {
+            for (int m : notes)
+                for (float det : { -0.06f, 0.06f })
+                {
+                    const float f = midiHz (m) * std::pow (2.0f, det / 12.0f);
+                    for (int i = 0; i < (int) ((dur + 0.4) * sr); ++i)
+                    {
+                        const float tt = (float) i / (float) sr;
+                        float v = 0.0f;
+                        for (int h = 1; h <= 14 && f * (float) h < 8000.0f; ++h) v += std::sin (twoPi * f * (float) h * tt) / std::pow ((float) h, 1.4f);
+                        const float env = juce::jmin (1.0f, tt / 0.4f) * (tt < dur ? 1.0f : std::exp (-(tt - (float) dur) / 0.12f));
+                        add ((int) (t0 * sr) + i, gain * v * env);
+                    }
+                }
+        };
+        auto ep = [&] (const std::vector<int>& notes, double t0, double dur, float gain)
+        {
+            for (int m : notes)
+            {
+                const float f = midiHz (m);
+                for (int i = 0; i < (int) ((dur + 0.3) * sr); ++i)
+                {
+                    const float tt = (float) i / (float) sr;
+                    const float idx = 1.6f * std::exp (-tt / 0.12f) + 0.25f;
+                    const float v = std::sin (twoPi * f * tt + idx * std::sin (twoPi * f * tt));
+                    const float env = std::exp (-tt / 1.1f) * (tt < dur ? 1.0f : std::exp (-(tt - (float) dur) / 0.08f));
+                    add ((int) (t0 * sr) + i, gain * v * env * (1.0f + 0.15f * std::sin (twoPi * 5.0f * tt)));
+                }
+            }
+        };
+        auto pluck = [&] (int m, double t0, double dur, float gain)
+        {
+            const int period = juce::jmax (2, (int) std::lround (sr / midiHz (m)));
+            std::vector<float> line ((size_t) period);
+            for (auto& v : line) v = rnd.nextFloat() * 2.0f - 1.0f;
+            int idx = 0; float prev = 0.0f;
+            for (int i = 0; i < (int) (dur * sr); ++i)
+            {
+                const float y = line[(size_t) idx];
+                line[(size_t) idx] = 0.5f * (y + prev) * 0.996f;
+                prev = y;
+                if (++idx >= period) idx = 0;
+                add ((int) (t0 * sr) + i, gain * y * juce::jmin (1.0f, (float) i / 40.0f));
+            }
+        };
+
+        // 0-40 s: pads for RESONATE
+        const std::vector<std::vector<int>> padChords = { { 48, 52, 55, 59 }, { 45, 48, 52, 55, 59 }, { 41, 45, 48, 52 }, { 43, 47, 50, 52 } };
+        for (int k = 0; k < 10; ++k) pad (padChords[(size_t) (k % 4)], k * 4.0, 3.4, 0.035f);
+        // 40-80 s: guitar for SPECTRAL
+        const std::vector<std::vector<int>> gtr = { { 40, 47, 52, 55, 59, 64 }, { 48, 52, 55, 60, 64, 60 }, { 43, 47, 50, 55, 59, 67 }, { 50, 57, 62, 66, 62, 57 } };
+        for (double t0 = 40.0; t0 < 79.0; t0 += 0.25)
+        {
+            const int k = (int) ((t0 - 40.0) / 2.0) % 4, s8 = (int) std::lround ((t0 - 40.0) / 0.25) % 8;
+            pluck (gtr[(size_t) k][(size_t) (s8 % 6)], t0, 1.6, 0.16f);
+        }
+        // EVOLVE song: verse (soft keys Am - F - Dm - E), chorus (loud pad + guitar C - G - F - G)
+        const std::vector<std::vector<int>> verse = { { 45, 57, 60, 64 }, { 41, 57, 60, 65 }, { 38, 57, 62, 65 }, { 40, 56, 59, 64 } };
+        const std::vector<std::vector<int>> chorus = { { 48, 55, 60, 64 }, { 43, 55, 59, 62 }, { 41, 57, 60, 65 }, { 43, 55, 59, 62 } };
+        const std::vector<std::vector<int>> chorusArp = { { 60, 64, 67, 72 }, { 59, 62, 67, 71 }, { 60, 65, 69, 72 }, { 59, 62, 67, 71 } };
+        auto playVerse = [&] (double from, double to)
+        {
+            for (double t0 = from; t0 < to - 0.5; t0 += 2.0)
+            {
+                const auto& c = verse[(size_t) ((int) ((t0 - from) / 2.0) % 4)];
+                ep (c, t0, 0.9, 0.06f);
+                ep ({ c[2], c[3] }, t0 + 1.0, 0.5, 0.06f);
+            }
+        };
+        auto playChorus = [&] (double from, double to)
+        {
+            for (double t0 = from; t0 < to - 0.5; t0 += 2.0)
+            {
+                const int k = (int) ((t0 - from) / 2.0) % 4;
+                pad (chorus[(size_t) k], t0, 1.9, 0.04f);
+                for (int s8 = 0; s8 < 8; ++s8) pluck (chorusArp[(size_t) k][(size_t) (s8 % 4)], t0 + s8 * 0.25, 1.0, 0.13f);
+            }
+        };
+        playVerse (80.0, 104.0);
+        playChorus (104.0, 120.0);
+        const int melody[] = { 69, 72, 76, 74, 72, 71, 69, 64 };          // A minor line, single notes
+        for (int k = 0; k < 8; ++k) pluck (melody[k], 120.0 + k * 0.45, 0.9, 0.2f);
+        playVerse (136.0, 152.0);
+        playChorus (152.0, 168.0);
+        return b;
+    }
+
+    juce::String tourInput (double t)
+    {
+        static const char* pads[4] = { "PAD  CMAJ7", "PAD  AM9", "PAD  FMAJ7", "PAD  G6" };
+        static const char* gt[4] = { "GUITAR  EM", "GUITAR  C", "GUITAR  G", "GUITAR  D" };
+        static const char* vs[4] = { "VERSE  AM", "VERSE  F", "VERSE  DM", "VERSE  E" };
+        static const char* ch[4] = { "CHORUS  C", "CHORUS  G", "CHORUS  F", "CHORUS  G" };
+        if (t < 40.0) return pads[(int) (std::fmod (t, 16.0) / 4.0)];
+        if (t < 80.0) return gt[(int) (std::fmod (t - 40.0, 8.0) / 2.0)];
+        if (t < 104.0) return vs[(int) (std::fmod (t - 80.0, 8.0) / 2.0)];
+        if (t < 120.0) return ch[(int) (std::fmod (t - 104.0, 8.0) / 2.0)];
+        if (t < 124.0) return "MELODY  A MINOR";
+        if (t < 136.0) return "- (PAUSE)";
+        if (t < 152.0) return vs[(int) (std::fmod (t - 136.0, 8.0) / 2.0)];
+        if (t < 168.0) return ch[(int) (std::fmod (t - 152.0, 8.0) / 2.0)];
+        return "-";
+    }
+
     juce::String evolveInput (double t)
     {
         static const char* names[4] = { "AM7", "FMAJ7", "CMAJ7", "G6" };
@@ -277,7 +418,7 @@ namespace
 
     const Caption& captionAt (double t)
     {
-        const auto& list = showcaseDemo ? showcaseCaptions : resonateDemo ? resonateCaptions : captions;
+        const auto& list = tourDemo ? tourCaptions : showcaseDemo ? showcaseCaptions : resonateDemo ? resonateCaptions : captions;
         const Caption* c = &list.front();
         for (auto& x : list) if (t >= x.start) c = &x;
         return *c;
@@ -295,6 +436,7 @@ namespace
     {
         if (showcaseDemo) return makeShowcase();
         if (evolveDemo) return makeEvolve();
+        if (tourDemo) return makeTour();
         juce::AudioBuffer<float> b (1, (int) ((resonateDemo ? 8.0 : phrase) * sr));
         b.clear();
         auto saw = [&] (float f, double t0, double t1)
@@ -328,12 +470,13 @@ int main (int argc, char** argv)
     resonateDemo = argc > 2 && juce::String (argv[2]) == "resonate";
     showcaseDemo = argc > 2 && juce::String (argv[2]) == "showcase";
     evolveDemo = argc > 2 && juce::String (argv[2]) == "evolve";
+    tourDemo = argc > 2 && juce::String (argv[2]) == "tour";
 
     const juce::File outDir (argv[1]);
     outDir.createDirectory();
     const auto videoOnly = outDir.getChildFile ("video_only.mp4");
     const auto audioFile = outDir.getChildFile ("audio.wav");
-    const auto finalFile = outDir.getChildFile (evolveDemo ? "ChaosGrainFX_evolve_demo.mp4" : showcaseDemo ? "ChaosGrainFX_showcase.mp4"
+    const auto finalFile = outDir.getChildFile (tourDemo ? "ChaosGrainFX_tour.mp4" : evolveDemo ? "ChaosGrainFX_evolve_demo.mp4" : showcaseDemo ? "ChaosGrainFX_showcase.mp4"
                                               : resonateDemo ? "ChaosGrainFX_resonate_demo.mp4" : "ChaosGrainFX_demo.mp4");
 
     std::unique_ptr<ChaosGrainProcessor> proc (static_cast<ChaosGrainProcessor*> (createPluginFilter()));
@@ -356,7 +499,7 @@ int main (int argc, char** argv)
     retro::ditherGradient (bgLow, bgLow.getBounds(), juce::Colour (0xff24222b), juce::Colour (0xff0d0c11), 6);
 
     const auto input = makePhrase();
-    const double duration = evolveDemo ? evolveLength : showcaseDemo ? 150.0 : resonateDemo ? 74.0 : 96.0;
+    const double duration = tourDemo ? tourLength : evolveDemo ? evolveLength : showcaseDemo ? 150.0 : resonateDemo ? 74.0 : 96.0;
     const int totalFrames = (int) (duration * fps);
     juce::AudioBuffer<float> audio (2, totalFrames * blocksPerFrame * blockSize);
     audio.clear();
@@ -378,7 +521,19 @@ int main (int argc, char** argv)
         const double t = (double) f / fps;
 
  // ---------------- Script ----------------
-        if (evolveDemo)
+        if (tourDemo)
+        {
+            const TourScene* sc = &tourScenes[0];
+            const TourScene* prev = &tourScenes[0];
+            for (auto& x : tourScenes) if (t >= x.t) { prev = sc; sc = &x; }
+            setP ("engine", (float) sc->engine);
+            setP ("shape", sweep (t, sc->t, sc->t + 1.5, prev->engine == sc->engine ? prev->shape : sc->shape, sc->shape));
+            setP ("chaos", sc->chaos);
+            setP ("mix", sweep (t, sc->t, sc->t + 1.0, prev->engine == sc->engine ? prev->mix : sc->mix, sc->mix));
+            setP ("freeze", sc->freeze ? 1.0f : 0.0f);
+            if (t >= 172.0) setP ("mix", sweep (t, 172.0, tourLength, sc->mix, 0.0f));
+        }
+        else if (evolveDemo)
         {
             setP ("engine", 2.0f); setP ("shape", 0.35f); setP ("chaos", 0.5f);
             setP ("mix", t < 86.0 ? 0.65f : sweep (t, 88.0, evolveLength, 0.65f, 0.0f));
@@ -462,6 +617,21 @@ int main (int argc, char** argv)
             for (int k = 1; k < 5; ++k) if (proc->evolve.uiStage[(size_t) k].load() > 0.5f) stage = k;
             const Caption evoCap = evolveCaption (t, stage);
             const auto& cap = evolveDemo ? evoCap : captionAt (t);
+            if (tourDemo)   // live read-out under the caption
+            {
+                static const char* pcN[12] = { "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B" };
+                auto pct = [&] (const char* id) { return juce::String (juce::roundToInt (proc->apvts.getRawParameterValue (id)->load() * 100.0f)) + "%"; };
+                juce::String info = "SHAPE " + pct ("shape") + "  CHAOS " + pct ("chaos") + "  MIX " + pct ("mix");
+                if (t >= 80.0)
+                {
+                    const int slot = proc->evolve.uiSection.load();
+                    const int d0 = (int) proc->evolve.uiDroneMidi[0].load(), d1 = (int) proc->evolve.uiDroneMidi[1].load();
+                    info = "GROWTH " + juce::String (juce::roundToInt (proc->evolve.uiGrowth.load() * 100.0f)) + "%"
+                         + (slot >= 0 ? juce::String ("  SECTION ") + juce::String::charToString ((juce::juce_wchar) ('A' + slot)) : juce::String())
+                         + (d0 >= 0 ? juce::String ("  DRONE ") + pcN[d0 % 12] + (d1 % 12 == d0 % 12 ? juce::String (" OCT") : juce::String ("+") + pcN[d1 % 12]) : juce::String());
+                }
+                retro::pixelText (g, info, { plugArea.getRight() + 50, 372, W - plugArea.getRight() - 80, 20 }, retro::pal::yellow, juce::Justification::topLeft, 2);
+            }
             int y = 120;
             if (juce::String (cap.step).isNotEmpty())
                 retro::pixelText (g, cap.step, { cx, y, cw, 20 }, retro::pal::yellow, juce::Justification::topLeft, 2);
@@ -485,6 +655,7 @@ int main (int argc, char** argv)
                 retro::pixelText (g, "GROWTH " + juce::String (gp) + "%" + (gp == 100 ? " FULL" : "") + "   TIME " + clock,
                                   { cx, 372, cw, 20 }, retro::pal::yellow, juce::Justification::topLeft, 2);
             }
+            else if (tourDemo) playing = tourInput (t);
             else if (showcaseDemo) playing = showcaseInput (t);
             else if (resonateDemo)
             {

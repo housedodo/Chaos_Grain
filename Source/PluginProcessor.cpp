@@ -388,6 +388,7 @@ void ChaosGrainProcessor::updateSteer (const TransportInfo& transport, int n)
     {
         if (steerBar < 0) steer = keyDetector.song();
         steerBar = bar;
+        if (((bar % 4) + 4) % 4 == 0) keyDetector.markPhraseDownbeat();
         steerTarget = keyDetector.song();   // changes land on bar lines...
         steer.seed = steerTarget.seed;
         steer.section = steerTarget.section;
@@ -400,6 +401,7 @@ void ChaosGrainProcessor::updateSteer (const TransportInfo& transport, int n)
     steer.sustain += (steerTarget.sustain - steer.sustain) * a;
     steer.reg += (steerTarget.reg - steer.reg) * a;
     steer.playing = keyDetector.song().playing;
+    steer.loudDb = keyDetector.song().loudDb;
 }
 
 void ChaosGrainProcessor::processFx (juce::AudioBuffer<float>& buffer, const TransportInfo& transport)
@@ -423,6 +425,7 @@ void ChaosGrainProcessor::processFx (juce::AudioBuffer<float>& buffer, const Tra
     const int root = keyValid ? keyDetector.root() : juce::jmax (0, lastNotePc);
     const bool minor = keyValid && keyDetector.isMinor();
 
+    updateSteer (transport, n);
     if (eng != lastEngine)
     {
         resonator.reset();
@@ -435,7 +438,6 @@ void ChaosGrainProcessor::processFx (juce::AudioBuffer<float>& buffer, const Tra
     float* wl = buffer.getWritePointer (0);
     float* wr = numCh > 1 ? buffer.getWritePointer (1) : nullptr;
     float space = 0.3f;
-    updateSteer (transport, n);
     auto steerInto = [this] (auto& prm)
     {
         prm.energy = steer.energy; prm.density = steer.density; prm.brightness = steer.brightness;
@@ -471,6 +473,9 @@ void ChaosGrainProcessor::processFx (juce::AudioBuffer<float>& buffer, const Tra
         ep.keyRoot = root; ep.minor = minor; ep.keyValid = keyValid;
         ep.song = steer;
         ep.favourites = keyDetector.favouritePitchClasses();
+        ep.numChord = keyDetector.getNotes (ep.chord.data());
+        ep.section = keyDetector.song().section;
+        ep.colour = keyDetector.recentPitchClasses();
         evolve.process (dl, dr, wl, wr, n, ep, transport);
         space = 0.2f + 0.65f * evolve.growth(); // the room widens as it grows
     }

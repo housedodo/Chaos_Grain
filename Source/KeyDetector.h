@@ -19,6 +19,9 @@ public:
     int root() const       { return keyRoot; }      // 0 = C ... 11 = B
     bool isMinor() const   { return minor; }
     int currentPitchClass() const { return framePc; } // -1 if silent
+    // Call on the downbeat of every 4-bar phrase (from the DAW's bar grid): the chord there
+    // is a strong hint for the key's home note.
+    void markPhraseDownbeat() { downbeatFrames = 6; } // read ~0.25 s later, when the new chord fills the analysis
 
     // Polyphonic note tracking: the notes (MIDI numbers, sorted) currently being played,
     // estimated with a harmonic sieve. Held while the sound sustains.
@@ -39,6 +42,7 @@ public:
         float brightness = 0.5f;  // dark 0 .. bright 1
         float sustain = 0.5f;     // staccato 0 .. held 1
         float reg = 0.5f;         // low 0 .. high 1 (register of the tracked notes)
+        float loudDb = -100.0f;   // absolute loudness of the last few seconds (dB)
         bool playing = false;
         int section = 0;          // increments on every detected section change
         juce::uint32 seed = 1;    // from the section's harmonic colour: same progression -> same seed
@@ -46,6 +50,7 @@ public:
     const SongState& song() const { return songState; }
     float playingSeconds() const { return playTime; }
     std::array<float, 12> favouritePitchClasses() const { return noteUse; } // long-term note usage (tracked notes)
+    std::array<float, 12> recentPitchClasses() const { return recentUse; }  // the last ~3 s (section fingerprint)
 
     std::atomic<float> uiEnergy { 0.0f }, uiDensity { 0.0f };
     std::atomic<int> uiSection { 0 };
@@ -72,15 +77,16 @@ private:
     SongState songState;
     float playTime = 0.0f;
     float rmsFast = 0.0f, rmsSlow = 0.0f, rmsPeak = 1.0e-4f, onsetRate = 0.0f, prevFrameEnergy = 0.0f;
-    float sustainAcc = 0.5f, sectionCooldown = 0.0f;
+    float sustainAcc = 0.5f, sectionCooldown = 0.0f, pauseLen = 0.0f, resumeTimer = -1.0f;
     std::array<float, 12> shortChroma {}, longChroma {}, sectionChroma {};
     std::array<float, size / 2> prevMag {};
     bool prevOnset = false;
-    std::array<float, 12> noteUse {};
+    std::array<float, 12> noteUse {}, recentUse {};
     // key evidence from the tracked notes (no overtones), the bass line and phrase starts
     std::array<float, 12> noteChroma {}, bassHist {}, homeHist {};
     float silentFor = 100.0f, noteDecay = 0.99f, bassDecay = 0.99f, homeDecay = 0.99f;
     bool notesFresh = false, phraseStart = true;
+    int downbeatFrames = -1;
     void bestKey (int& root, bool& isMinor, float& score) const;
     float keyScore (int root, bool isMinor) const;
     float shortBright = 0.5f, longBright = 0.5f, shortEnergy = 0.0f, longEnergy = 0.0f;

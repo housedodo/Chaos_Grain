@@ -32,7 +32,7 @@ void KeyDetector::prepare (double sampleRate)
     decay = std::exp (-(float) hop / (float) (8.0 * sr));
     noteDecay = std::exp (-(float) hop / (float) (12.0 * sr));
     bassDecay = std::exp (-(float) hop / (float) (16.0 * sr));
-    homeDecay = std::exp (-(float) hop / (float) (45.0 * sr));
+    homeDecay = std::exp (-(float) hop / (float) (20.0 * sr));
     reset();
 }
 
@@ -49,11 +49,11 @@ void KeyDetector::reset()
     songState = SongState {};
     playTime = 0.0f;
     rmsFast = rmsSlow = onsetRate = prevFrameEnergy = 0.0f;
-    rmsPeak = 1.0e-4f; sustainAcc = 0.5f; sectionCooldown = 0.0f;
+    rmsPeak = 1.0e-4f; sustainAcc = 0.5f; sectionCooldown = 0.0f; pauseLen = 0.0f; resumeTimer = -1.0f;
     shortChroma.fill (0.0f); longChroma.fill (0.0f); sectionChroma.fill (0.0f);
-    prevMag.fill (0.0f); prevOnset = false; noteUse.fill (0.0f);
+    prevMag.fill (0.0f); prevOnset = false; noteUse.fill (0.0f); recentUse.fill (0.0f);
     noteChroma.fill (0.0f); bassHist.fill (0.0f); homeHist.fill (0.0f);
-    silentFor = 100.0f; notesFresh = false; phraseStart = true;
+    silentFor = 100.0f; notesFresh = false; phraseStart = true; downbeatFrames = -1;
     shortBright = longBright = 0.5f; shortEnergy = longEnergy = 0.0f;
     uiRoot.store (-1);
 }
@@ -122,6 +122,7 @@ void KeyDetector::analyse()
     {
         for (int k = 0; k < numNotes; ++k) noteChroma[(size_t) (notes[(size_t) k] % 12)] += 1.0f;
         bassHist[(size_t) (notes[0] % 12)] += 1.0f;
+        if (downbeatFrames > 0 && --downbeatFrames == 0) homeHist[(size_t) (notes[0] % 12)] += 1.0f;
         if (phraseStart && notesFresh)
         {
             homeHist[(size_t) (notes[0] % 12)] += 1.0f;
@@ -175,7 +176,7 @@ float KeyDetector::keyScore (int root, bool isMinor) const
     // The tonic tends to be in the bass and to start phrases. This decides between keys that
     // share their notes (C major / A minor, E minor / G major ...).
     if (sb > 0.0f) s += 0.3f * bassHist[(size_t) root] / sb;
-    if (sh > 0.0f) s += 0.3f * homeHist[(size_t) root] / sh;
+    if (sh > 0.0f) s += 0.3f * homeHist[(size_t) root] / juce::jmax (sh, 1.0f); // fades as it ages
     return s;
 }
 
@@ -274,10 +275,12 @@ void KeyDetector::trackNotes (float total)
         bool keep = true;
         if (valid && best < 0.6f * first)
         {
-            static const int majorSteps[7] = { 0, 2, 4, 5, 7, 9, 11 }, minorSteps[7] = { 0, 2, 3, 5, 7, 8, 10 };
+            // (minor keys also allow the raised 7th - the E major chord in A minor has a G#)
+            static const int majorSteps[7] = { 0, 2, 4, 5, 7, 9, 11 }, minorSteps[8] = { 0, 2, 3, 5, 7, 8, 10, 11 };
             const int pc = ((arg - keyRoot) % 12 + 12) % 12;
             keep = false;
-            for (int s : (minor ? minorSteps : majorSteps)) keep |= s == pc;
+            if (minor) for (int s : minorSteps) keep |= s == pc;
+            else       for (int s : majorSteps) keep |= s == pc;
         }
         if (keep) found[(size_t) count++] = arg;
 
@@ -342,24 +345,27 @@ void KeyDetector::updateSong (float total, const std::array<float, 12>& frame)
         }
         const float centroid = den > 0.0f ? num / den : 1000.0f;
         const float b = juce::jlimit (0.0f, 1.0f, std::log (centroid / 300.0f) / std::log (5000.0f / 300.0f));
-        smooth (shortBright, b, 2.0f);
+        smooth (shortBright, b, 3.0f);
         smooth (longBright, b, 12.0f);
         smooth (sustainAcc, onset ? 0.0f : 1.0f, 3.0f);
         std::array<float, 12> held {};
         for (int k = 0; k < numNotes; ++k) held[(size_t) (notes[(size_t) k] % 12)] += 1.0f / (float) numNotes;
         for (int i = 0; i < 12; ++i)
         {
-            smooth (shortChroma[(size_t) i], frame[(size_t) i], 2.0f);
+            smooth (shortChroma[(size_t) i], frame[(size_t) i], 4.0f);
+            smooth (sectionChroma[(size_t) i], frame[(size_t) i], 12.0f);   // the current section's average
             smooth (longChroma[(size_t) i], frame[(size_t) i], 15.0f);
             if (numNotes > 0) smooth (noteUse[(size_t) i], held[(size_t) i], 20.0f);
+            if (numNotes > 0) smooth (recentUse[(size_t) i], held[(size_t) i], 3.0f);
         }
     }
-    smooth (shortEnergy, rmsFast / rmsPeak, 1.0f);
+    smooth (shortEnergy, rmsFast / rmsPeak, 3.0f);
     smooth (longEnergy, rmsSlow / rmsPeak, 12.0f);
 
     auto& s = songState;
     s.playing = playing;
     s.energy = juce::jlimit (0.0f, 1.0f, rmsSlow / rmsPeak);
+    s.loudDb = juce::Decibels::gainToDecibels (rmsSlow, -100.0f);
     s.density = juce::jlimit (0.0f, 1.0f, onsetRate / 6.0f);
     s.brightness = shortBright;
     s.sustain = juce::jlimit (0.0f, 1.0f, sustainAcc);
@@ -370,18 +376,28 @@ void KeyDetector::updateSong (float total, const std::array<float, 12>& frame)
         s.reg += (juce::jlimit (0.0f, 1.0f, (m / (float) numNotes - 36.0f) / 48.0f) - s.reg) * 0.05f;
     }
 
-    // Section change: the last ~2 s differ clearly from the last ~12 s (energy, brightness, harmony)
+    // Section change: the last ~4 s differ clearly from the section so far (energy, brightness,
+    // harmony) - or you come back after a pause of 2 s or more (counted 3 s after you resume)
     sectionCooldown = juce::jmax (0.0f, sectionCooldown - dt);
-    if (playing && playTime > 6.0f && sectionCooldown <= 0.0f)
+    if (! playing) pauseLen += dt;
+    else
+    {
+        if (pauseLen > 2.0f) resumeTimer = 0.0f;
+        pauseLen = 0.0f;
+        if (resumeTimer >= 0.0f) resumeTimer += dt;
+    }
+    const bool afterPause = resumeTimer > 3.0f;
+    if (afterPause) resumeTimer = -1.0f;
+    if (playing && playTime > 6.0f && (sectionCooldown <= 0.0f || afterPause))
     {
         float harm = 0.0f;
         for (int i = 0; i < 12; ++i) harm += std::abs (shortChroma[(size_t) i] - sectionChroma[(size_t) i]);
         const float novelty = 1.5f * std::abs (shortEnergy - longEnergy) + 1.2f * std::abs (shortBright - longBright) + 0.6f * harm;
-        if (novelty > 0.9f || s.section == 0)
+        if (novelty > 0.9f || s.section == 0 || afterPause)
         {
             ++s.section;
             sectionCooldown = 8.0f;
-            sectionChroma = shortChroma;
+            sectionChroma = shortChroma;   // the new section's average starts from here
             // seed from the section's harmonic colour: its three strongest pitch classes + key
             std::array<int, 12> idx {};
             for (int i = 0; i < 12; ++i) idx[(size_t) i] = i;

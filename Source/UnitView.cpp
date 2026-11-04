@@ -842,7 +842,12 @@ void UnitView::renderFx (juce::Image& img)
         static const char* stageNames[5] = { "SPACE", "RESONATE", "ECHOES", "DRONE", "SHIMMER" };
         int stage = 0;
         for (int k = 1; k < 5; ++k) if (st[k] > 0.5f) stage = k;
-        c.small (stageNames[stage], (float) scrX + 3, scrY + 13, col::glow);
+        // stage, remembered section (A, B, C ...) and what it is doing in a pause
+        juce::String label = stageNames[stage];
+        if (rec > 0.05f) label = proc.evolve.uiHarmony.load() > 0.05f ? "DUET" : "ANSWER";
+        const int slot = proc.evolve.uiSection.load();
+        if (slot >= 0) label += juce::String ("  SEC ") + juce::String::charToString ((juce::juce_wchar) ('A' + slot));
+        c.small (label, (float) scrX + 3, scrY + 13, rec > 0.05f ? col::seg : col::glow);
     }
     else
     {

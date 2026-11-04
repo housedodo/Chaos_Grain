@@ -24,6 +24,7 @@ namespace
     }
 
     constexpr float resPan[Evolve::numRes] = { 0.3f, 0.7f, 0.42f, 0.58f };
+    const int majorSteps[7] = { 0, 2, 4, 5, 7, 9, 11 }, minorSteps[7] = { 0, 2, 3, 5, 7, 8, 10 };
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -103,7 +104,11 @@ void Evolve::reset()
     shimPos = 0; shimPhase = 0.0f; shimOut = 0.0f;
     std::fill (mem.begin(), mem.end(), 0.0f);
     memCount = 0; numMarks = 0;
-    recalling = false; recallGain = 0.0f; stepsSinceRecall = 0;
+    recalling = false; recallGain = 0.0f; stepsSinceRecall = 0; harmOn = false;
+    chordMask = 0; droneMask = -1; dronePc = -1; chordStable = 0.0f;
+    for (auto& sl : slots) sl = Slot {};
+    curSlot = -1; lastSection = 0; slotAge = 0; sectionTimer = growTarget = -1.0f;
+    growHistory.fill (0.0f); growHistPos = 0; growHistTimer = 0.0f;
     std::fill (loopL.begin(), loopL.end(), 0.0f);
     std::fill (loopR.begin(), loopR.end(), 0.0f);
     loopW = loopStart = loopU = 0; freezeMix = 0.0f; wasFrozen = false;
@@ -159,8 +164,9 @@ void Evolve::onBar (const Params& p)
         for (int k = 0; k < numWant; ++k) if (! used[(size_t) k]) { used[(size_t) k] = true; v.pending = want[(size_t) k]; break; }
     }
 
-    // Drone on the root and fifth of the key (or the favourite note before a key is known)
-    if (top > 0.0f || p.keyValid)
+    // Drone on the root and fifth of the key until a chord has been heard (then the smart
+    // drone follows the progression, see updateDrone)
+    if (dronePc < 0 && (top > 0.0f || p.keyValid))
     {
         const int rootPc = p.keyValid ? p.keyRoot : idx[0];
         const int m = 33 + ((rootPc - 9 + 12) % 12);   // A1 .. G#2
@@ -176,6 +182,81 @@ void Evolve::onBar (const Params& p)
     if (std::abs (target - delayCur) > 1.0f && delayXf >= 1.0f) { delayNew = target; delayXf = 0.0f; }
 }
 
+// SMART DRONE: holds the key's root as a pedal while it fits the chord. When the chord clashes
+// with it (a semitone away from a chord note) - or, with CHAOS, freely - it moves: to a note it
+// shares with the new chord, else to the chord's bass. Its fifth drops to an octave if the
+// fifth would clash. Same progression -> same moves (seeded by the song).
+void Evolve::updateDrone (const Params& p)
+{
+    if (p.numChord <= 0) return;
+    const float chaos = juce::jlimit (0.0f, 1.0f, p.chaos);
+    droneRng.setSeed ((juce::int64) activeSeed * 31 + chordMask);
+    auto inChord = [&] (int pc) { return (chordMask >> pc) & 1; };
+    auto clashes = [&] (int pc)
+    {
+        for (int q = 0; q < 12; ++q)
+            if (inChord (q)) { const int d = (pc - q + 12) % 12; if (d == 1 || d == 11) return true; }
+        return false;
+    };
+    const int keyRoot = p.keyValid ? p.keyRoot : p.chord[0] % 12;
+    const bool follow = droneRng.nextFloat() < chaos * 0.6f;
+    int target;
+    if (! follow && ! clashes (keyRoot)) target = keyRoot;                         // pedal
+    else if (dronePc >= 0 && inChord (dronePc) && ! follow) target = dronePc;       // common tone
+    else
+    {
+        target = p.chord[0] % 12;                                                    // the chord's bass
+        if (follow && dronePc >= 0 && inChord (dronePc) && droneRng.nextFloat() < 0.5f) target = dronePc;
+    }
+    dronePc = target;
+    const int m = 33 + ((target - 9 + 12) % 12);   // A1 .. G#2
+    drone[0].pending = m;
+    drone[1].pending = clashes ((target + 7) % 12) ? m + 12 : m + 7;
+}
+
+// SECTION MEMORY: a few seconds into every new section, its fingerprint (which notes, how
+// loud) is compared with the sections heard before. A known section brings back the growth
+// it had (the chorus returns in full bloom, the verse calmer); a new one is remembered.
+void Evolve::identifySection (const Params& p)
+{
+    if (silentTime > 0.5f) return;   // only fingerprint a section while it is being played
+    std::array<float, 12> c = p.colour;
+    float sum = 0.0f;
+    for (float v : c) sum += v;
+    if (sum <= 0.0f) return;
+    for (auto& v : c) v /= sum;
+    const float loud = p.song.loudDb;
+
+    int best = -1; float bestSim = 0.0f;
+    for (int j = 0; j < maxSlots; ++j)
+    {
+        const auto& sl = slots[(size_t) j];
+        if (! sl.used || std::abs (sl.loudDb - loud) > 6.0f) continue;   // same loudness (within 6 dB)
+        float sim = 0.0f;
+        for (int i = 0; i < 12; ++i) sim += juce::jmin (c[(size_t) i], sl.colour[(size_t) i]);
+        if (sim > bestSim) { bestSim = sim; best = j; }
+    }
+    ++slotAge;
+    if (best >= 0 && bestSim > 0.72f)
+    {
+        auto& sl = slots[(size_t) best];
+        curSlot = best;
+        sl.age = slotAge;
+        for (int i = 0; i < 12; ++i) sl.colour[(size_t) i] = 0.7f * sl.colour[(size_t) i] + 0.3f * c[(size_t) i];
+        sl.loudDb = 0.7f * sl.loudDb + 0.3f * loud;
+        if (std::abs (sl.growth - grow) > 0.05f) { growTarget = sl.growth; glideTime = 0.0f; }
+        return;
+    }
+    int j = 0;
+    for (int k = 0; k < maxSlots; ++k)
+    {
+        if (! slots[(size_t) k].used) { j = k; break; }
+        if (slots[(size_t) k].age < slots[(size_t) j].age) j = k;
+    }
+    slots[(size_t) j] = Slot { c, loud, grow, true, slotAge };
+    curSlot = j;
+}
+
 void Evolve::startRecall (const Params& p)
 {
     const float chaos = juce::jlimit (0.0f, 1.0f, p.chaos);
@@ -183,13 +264,33 @@ void Evolve::startRecall (const Params& p)
     static const double rates[3] = { -1.0, 2.0, 0.5 };   // reversed, octave up, half speed (octave down)
     recallRate = rates[rng.nextInt (3)];
     recallLen = (int) ((0.5f + rng.nextFloat() + 0.8f * chaos) * (float) sr);
-    const auto srcLen = (long long) std::ceil (recallLen * std::abs (recallRate)) + 2;
+
+    // HARMONISED ANSWERS: a melodic moment gets a second voice a third above or a sixth
+    // below, in the key (the interval is worked out from the note and the scale)
+    harmOn = false;
+    if (m.melody && m.pc >= 0 && p.keyValid && rng.nextFloat() < 0.4f + 0.6f * chaos)
+    {
+        const int* scale = p.minor ? minorSteps : majorSteps;
+        const int rel = ((m.pc - p.keyRoot) % 12 + 12) % 12;
+        for (int d = 0; d < 7; ++d)
+            if (scale[d] == rel)
+            {
+                const int third = (scale[(d + 2) % 7] - scale[d] + 12) % 12;
+                const int semis = rng.nextFloat() < 0.5f ? third : third - 12;
+                harmRate = recallRate * std::pow (2.0, semis / 12.0);
+                harmOn = true;
+                break;
+            }
+    }
+    const double maxRate = juce::jmax (std::abs (recallRate), harmOn ? std::abs (harmRate) : 0.0);
+    const auto srcLen = (long long) std::ceil (recallLen * maxRate) + 2;
     const auto memLen = (long long) mem.size();
     const long long earliest = memCount - memLen + 2;
     const long long start = juce::jmin (m.at - (long long) (0.03 * sr), memCount - srcLen);
     if (start < earliest || start < 0) return;
     recallStart = start;
-    recallPos = recallRate < 0.0 ? (double) (srcLen - 2) : 0.0;
+    recallPos = recallRate < 0.0 ? (double) (recallLen * std::abs (recallRate)) : 0.0;
+    harmPos = harmRate < 0.0 ? (double) (recallLen * std::abs (harmRate)) : 0.0;
     recallDone = 0;
     recallPan = 0.25f + 0.5f * rng.nextFloat();
     recalling = true;
@@ -222,6 +323,8 @@ void Evolve::process (const float* inL, const float* inR, float* outL, float* ou
         numMarks = 0;
         recalling = false;
         for (auto& v : res) v.pending = -1;
+        for (auto& sl : slots) sl = Slot {};
+        curSlot = -1; growTarget = -1.0f;
     }
     bpm = t.bpm > 0.0 ? t.bpm : 120.0;
 
@@ -235,7 +338,51 @@ void Evolve::process (const float* inL, const float* inR, float* outL, float* ou
         const float T = growSeconds (p.shape);
         if (silentTime < 1.5f) grow += dt / T;   // short gaps between phrases still count as playing
         else if (silentTime > 4.0f) grow -= dt / (0.75f * T);
+        if (growTarget >= 0.0f)                  // a remembered section: glide to its growth
+        {
+            grow += (growTarget - grow) * (1.0f - std::exp (-dt / 1.5f));
+            glideTime += dt;
+            if (std::abs (growTarget - grow) < 0.02f || glideTime > 4.0f) growTarget = -1.0f;
+        }
         grow = juce::jlimit (0.0f, 1.0f, grow);
+
+        // section memory
+        if (p.section != lastSection)
+        {
+            lastSection = p.section;
+            // the change is noticed a few seconds late: remember the growth from ~4 s ago
+            if (curSlot >= 0) slots[(size_t) curSlot].growth = growHistory[(size_t) ((growHistPos + 8) % 16)];
+            curSlot = -1;
+            sectionTimer = 0.0f;
+        }
+        if ((growHistTimer += dt) >= 0.5f)
+        {
+            growHistTimer = 0.0f;
+            growHistory[(size_t) growHistPos] = grow;
+            growHistPos = (growHistPos + 1) % 16;
+        }
+        if (sectionTimer >= 0.0f && (sectionTimer += dt) > 4.0f) { sectionTimer = -1.0f; identifySection (p); }
+        if (curSlot >= 0)
+        {
+            auto& sl = slots[(size_t) curSlot];
+            if (growTarget < 0.0f) sl.growth = grow;
+            // the fingerprint keeps learning while the section plays
+            float sum = 0.0f;
+            for (float v : p.colour) sum += v;
+            const float a = 1.0f - std::exp (-dt / 8.0f);
+            if (sum > 0.0f)
+                for (int i = 0; i < 12; ++i) sl.colour[(size_t) i] += (p.colour[(size_t) i] / sum - sl.colour[(size_t) i]) * a;
+            sl.loudDb += (p.song.loudDb - sl.loudDb) * a;
+        }
+    }
+
+    // smart drone: re-evaluated when a new chord has settled (~0.25 s)
+    {
+        int mask = 0;
+        for (int k = 0; k < p.numChord; ++k) mask |= 1 << (p.chord[(size_t) k] % 12);
+        if (mask != chordMask) { chordMask = mask; chordStable = 0.0f; }
+        else chordStable += dt;
+        if (mask != 0 && chordStable > 0.25f && mask != droneMask && ! p.freeze) { droneMask = mask; updateDrone (p); }
     }
     const float r1 = smoothstep (0.12f, 0.3f, grow);   // resonance
     const float r2 = smoothstep (0.3f, 0.5f, grow);    // echoes
@@ -254,11 +401,12 @@ void Evolve::process (const float* inL, const float* inR, float* outL, float* ou
     const float resT60 = p.freeze ? 1000.0f : 1.5f + 4.0f * song.sustain;
     const float droneT60 = p.freeze ? 1000.0f : 8.0f;
     const float voiceFade = timeCoef (0.05f, sr) * 1.0f;
+    const float droneFade = timeCoef (0.08f, sr);
     const float resDampHz = 6000.0f, droneDampHz = 1200.0f;
     for (auto* v : { &res[0], &res[1], &res[2], &res[3], &drone[0], &drone[1] })
     {
         const bool isDrone = v == &drone[0] || v == &drone[1];
-        if (v->pending != v->midi && v->gain < 1.0e-3f)
+        if (v->pending != v->midi && v->gain < (isDrone ? 1.0e-2f : 1.0e-3f))
         {
             v->midi = v->pending;
             v->l.clear(); v->r.clear();
@@ -323,7 +471,7 @@ void Evolve::process (const float* inL, const float* inR, float* outL, float* ou
             if (env > 1.8f * envSlow && env > 0.3f * peak && onsetCool <= 0.0f)
             {
                 onsetCool = 0.4f;
-                Mark mk { memCount, env / peak };
+                Mark mk { memCount, env / peak, p.numChord > 0 ? p.chord[(size_t) (p.numChord - 1)] % 12 : -1, p.numChord > 0 && p.numChord <= 2 };
                 if (numMarks < maxMarks) marks[(size_t) numMarks++] = mk;
                 else
                 {
@@ -337,7 +485,7 @@ void Evolve::process (const float* inL, const float* inR, float* outL, float* ou
         }
 
         // recall: a remembered fragment, transformed
-        float rec = 0.0f;
+        float rec = 0.0f, harm = 0.0f;
         recallGain += ((silentTime > 0.3f ? 1.0f : 0.0f) - recallGain) * recallFade;
         if (recalling)
         {
@@ -345,6 +493,11 @@ void Evolve::process (const float* inL, const float* inR, float* outL, float* ou
             const float win = std::sin (pi * prog);
             rec = readFrac (mem, (double) recallStart + recallPos) * win * recallGain * 0.9f;
             recallPos += recallRate;
+            if (harmOn)
+            {
+                harm = readFrac (mem, (double) recallStart + harmPos) * win * recallGain * 0.6f;
+                harmPos += harmRate;
+            }
             if (++recallDone >= recallLen || (recallGain < 1.0e-3f && silentTime < 0.3f)) recalling = false;
         }
 
@@ -369,7 +522,7 @@ void Evolve::process (const float* inL, const float* inR, float* outL, float* ou
         for (int v = 0; v < numDrone; ++v)
         {
             auto& vc = drone[(size_t) v];
-            vc.gain += ((vc.midi >= 0 && vc.pending == vc.midi ? 1.0f : 0.0f) - vc.gain) * voiceFade;
+            vc.gain += ((vc.midi >= 0 && vc.pending == vc.midi ? 1.0f : 0.0f) - vc.gain) * droneFade;
             if (vc.midi < 0) continue;
             const float breathe = 0.75f + 0.25f * std::sin (droneLfo + (float) v * pi);
             dL += vc.gain * breathe * vc.l.tick (droneLp * droneIg, droneDamp) * (v == 0 ? 1.0f : 0.6f);
@@ -388,7 +541,7 @@ void Evolve::process (const float* inL, const float* inR, float* outL, float* ou
         };
         const float tl = tap (echoL), tr = tap (echoR);
         if (delayXf < 1.0f && (delayXf += xfStep) >= 1.0f) { delayXf = 1.0f; delayCur = delayNew; }
-        const float echoIn = (x * 0.5f + 0.4f * (resL + resR) + rec * 0.7f + shimOut * shimFb) * echoAmt;
+        const float echoIn = (x * 0.5f + 0.4f * (resL + resR) + rec * 0.7f + harm * 0.5f + shimOut * shimFb) * echoAmt;
         fbLpL += fbLpA * (tr - fbLpL);
         fbLpR += fbLpA * (tl - fbLpR);
         echoL[(size_t) echoW] = std::tanh (echoIn + fb * fbLpL);
@@ -419,8 +572,8 @@ void Evolve::process (const float* inL, const float* inR, float* outL, float* ou
         }
         else shimOut = 0.0f;
 
-        float l = directG * xl + resL + tl + dL + shL + rec * (1.0f - recallPan) * 2.4f;
-        float r = directG * xr + resR + tr + dR + shR + rec * recallPan * 2.4f;
+        float l = directG * xl + resL + tl + dL + shL + (rec * (1.0f - recallPan) + harm * recallPan) * 2.4f;
+        float r = directG * xr + resR + tr + dR + shR + (rec * recallPan + harm * (1.0f - recallPan)) * 2.4f;
 
         // FREEZE: loop the last two seconds seamlessly
         const int ln = (int) loopL.size();
@@ -457,6 +610,9 @@ void Evolve::process (const float* inL, const float* inR, float* outL, float* ou
     uiGrowth.store (grow, std::memory_order_relaxed);
     uiMemories.store (numMarks, std::memory_order_relaxed);
     uiRecall.store (recalling ? recallGain : 0.0f, std::memory_order_relaxed);
+    uiHarmony.store (recalling && harmOn ? recallGain : 0.0f, std::memory_order_relaxed);
+    uiSection.store (curSlot, std::memory_order_relaxed);
+    for (int v = 0; v < numDrone; ++v) uiDroneMidi[(size_t) v].store ((float) drone[(size_t) v].pending, std::memory_order_relaxed);
     const float st[5] = { 1.0f, r1, r2, r3, r4 };
     for (int k = 0; k < 5; ++k) uiStage[(size_t) k].store (st[k], std::memory_order_relaxed);
     for (int v = 0; v < numRes; ++v) uiResMidi[(size_t) v].store ((float) res[(size_t) v].midi, std::memory_order_relaxed);

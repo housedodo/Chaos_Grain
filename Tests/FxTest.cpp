@@ -205,6 +205,7 @@ int main (int argc, char** argv)
             { { { 42, 57, 61, 66 }, { 50, 57, 62, 66 }, { 45, 57, 61, 64 }, { 40, 56, 59, 64 } }, 6, true,  "F#m-D-A-E -> F# min" },
             { { { 46, 58, 62, 65 }, { 43, 58, 62, 67 }, { 39, 58, 63, 67 }, { 41, 57, 60, 65 } }, 10, false, "Bb-Gm-Eb-F -> Bb maj" },
             { { { 45, 57, 60, 64 }, { 43, 55, 59, 62 }, { 41, 57, 60, 65 }, { 40, 56, 59, 64 } }, 9, true,  "Am-G-F-E -> A min" },
+            { { { 48, 55, 60, 64 }, { 43, 55, 59, 62 }, { 41, 57, 60, 65 }, { 43, 55, 59, 62 } }, 0, false, "C-G-F-G -> C maj" },
         };
         static const char* pcName[12] = { "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B" };
         for (auto& pr : progs)
@@ -216,6 +217,47 @@ int main (int argc, char** argv)
             std::printf ("   (%s: heard %s %s)\n", pr.name, pcName[kd.root()], kd.isMinor() ? "min" : "maj");
             check (ok, juce::String ("auto key: ") + pr.name, (float) kd.root());
         }
+    }
+
+    // 2c. Key change: 20 s in C major, then A minor with its E major chord -> follows within ~10 s
+    {
+        auto fm = [] (juce::AudioBuffer<float>& b, const std::vector<std::vector<int>>& chords, double from, double to)
+        {
+            int k = 0;
+            for (double t0 = from; t0 + 0.2 < to; t0 += 2.0, ++k)
+                for (int m : chords[(size_t) k % chords.size()])
+                {
+                    const float f = 440.0f * std::pow (2.0f, (float) (m - 69) / 12.0f);
+                    for (int i = 0; i < (int) (1.95 * sr); ++i)
+                    {
+                        const float tt = (float) i / (float) sr;
+                        const float idx = 1.6f * std::exp (-tt / 0.12f) + 0.25f;
+                        b.addSample (0, (int) (t0 * sr) + i, 0.08f * std::sin (twoPi * f * tt + idx * std::sin (twoPi * f * tt)) * std::exp (-tt / 1.5f));
+                    }
+                }
+        };
+        juce::AudioBuffer<float> b (1, (int) (sr * 44.5));
+        b.clear();
+        fm (b, { { 48, 55, 60, 64 }, { 43, 55, 59, 62 }, { 41, 57, 60, 65 }, { 43, 55, 59, 62 } }, 0.0, 24.0);   // C G F G
+        fm (b, { { 45, 57, 60, 64 }, { 41, 57, 60, 65 }, { 38, 57, 62, 65 }, { 40, 56, 59, 64 } }, 24.0, 44.0);  // Am F Dm E
+        Rig r (b);
+        r.run (23.5);
+        const bool wasC = r.proc->keyDetector.root() == 0 && ! r.proc->keyDetector.isMinor();
+        r.run (10.5);
+        const bool nowAm = r.proc->keyDetector.root() == 9 && r.proc->keyDetector.isMinor();
+        check (wasC && nowAm, "auto key: follows a key change (C maj -> A min in 10 s)", (float) r.proc->keyDetector.root());
+
+        juce::AudioBuffer<float> b2 (1, (int) (sr * 44.5));
+        b2.clear();
+        fm (b2, { { 45, 57, 60, 64 }, { 41, 57, 60, 65 }, { 38, 57, 62, 65 }, { 40, 56, 59, 64 } }, 0.0, 24.0);  // Am F Dm E
+        fm (b2, { { 48, 55, 60, 64 }, { 43, 55, 59, 62 }, { 41, 57, 60, 65 }, { 43, 55, 59, 62 } }, 24.0, 44.0); // C G F G
+        Rig r2 (b2);
+        r2.run (23.5);
+        const bool wasAm = r2.proc->keyDetector.root() == 9 && r2.proc->keyDetector.isMinor();
+        std::printf ("   (A min -> C maj:");
+        for (int k = 0; k < 10; ++k) { r2.run (2.0); std::printf (" %d%s", r2.proc->keyDetector.root(), r2.proc->keyDetector.isMinor() ? "m" : ""); }
+        std::printf (")\n");
+        check (wasAm && r2.proc->keyDetector.root() == 0 && ! r2.proc->keyDetector.isMinor(), "auto key: follows a key change (A min -> C maj)", (float) r2.proc->keyDetector.root());
     }
 
     // 3. Every engine sounds, stays finite and bounded (default + extreme settings)
@@ -600,6 +642,108 @@ int main (int argc, char** argv)
         check (memories >= 3, "evolve: remembers strong moments (count)", (float) memories);
         check (recallSeen > 0.5f, "evolve: answers in the pause (recall level)", recallSeen);
         check (rms (pause) > 0.002f && finite (pause), "evolve: still audible 5-10 s into the pause (rms)", rms (pause));
+    }
+
+    // 12. EVOLVE: smart drone, section memory, harmonised answers
+    {
+        // chords as electric-piano-like tones; `gain` sets the loudness
+        auto epProg = [] (const std::vector<std::vector<int>>& chords, double each, double total, float gain)
+        {
+            juce::AudioBuffer<float> b (1, (int) (sr * total));
+            b.clear();
+            int k = 0;
+            for (double t0 = 0.0; t0 + 0.2 < total; t0 += each, ++k)
+                for (int m : chords[(size_t) k % chords.size()])
+                {
+                    const float f = 440.0f * std::pow (2.0f, (float) (m - 69) / 12.0f);
+                    for (int i = 0; i < (int) ((each - 0.05) * sr) && (int) (t0 * sr) + i < b.getNumSamples(); ++i)
+                    {
+                        const float tt = (float) i / (float) sr;
+                        const float idx = 1.6f * std::exp (-tt / 0.12f) + 0.25f;
+                        b.addSample (0, (int) (t0 * sr) + i, gain * std::sin (twoPi * f * tt + idx * std::sin (twoPi * f * tt)) * std::exp (-tt / 1.5f));
+                    }
+                }
+            return b;
+        };
+
+        // Smart drone: Am - G - F - E in A minor. Pedal A while it fits; over E major (G# clashes
+        // with A) it moves; over F its fifth (E, a semitone from F) becomes an octave.
+        {
+            Rig r (epProg ({ { 45, 57, 60, 64 }, { 43, 55, 59, 62 }, { 41, 57, 60, 65 }, { 40, 56, 59, 64 } }, 2.0, 8.0, 0.08f));
+            r.set ("engine", 2.0f); r.set ("chaos", 0.0f);
+            r.run (16.0); // two rounds: the key is known by now
+            int pcAm = -1, pcF = -1, pcF2 = -1, pcE = -1;
+            for (int k = 0; k < 16; ++k)
+            {
+                r.run (0.5);
+                const double ph = std::fmod (16.5 + 0.5 * k, 8.0);
+                const int d0 = ((int) r.proc->evolve.uiDroneMidi[0].load()) % 12, d1 = ((int) r.proc->evolve.uiDroneMidi[1].load()) % 12;
+                if (ph > 1.0 && ph <= 2.0) pcAm = d0;
+                if (ph > 5.0 && ph <= 6.0) { pcF = d0; pcF2 = d1; }
+                if (ph > 7.0 && ph <= 8.0) pcE = d0;
+            }
+            std::printf ("   (drone: Am -> %d, F -> %d+%d, E -> %d)\n", pcAm, pcF, pcF2, pcE);
+            check (pcAm == 9 && pcF == 9, "evolve: smart drone holds A as a pedal (Am, F)", (float) pcF);
+            check (pcF2 == 9, "evolve: drone fifth (E) becomes an octave over F", (float) pcF2);
+            check (pcE != 9 && pcE >= 0, "evolve: drone leaves A when E major clashes (pc)", (float) pcE);
+        }
+
+        // Section memory: quiet verse (Am - F), loud chorus (C - G), verse, chorus again
+        {
+            auto verse = epProg ({ { 45, 57, 60, 64 }, { 41, 57, 60, 65 } }, 2.0, 24.0, 0.03f);
+            auto chorus = epProg ({ { 48, 60, 64, 67 }, { 43, 59, 62, 67 } }, 1.0, 24.0, 0.12f);
+            juce::AudioBuffer<float> song (1, verse.getNumSamples() * 2 + chorus.getNumSamples() * 2);
+            int at = 0;
+            for (auto* part : { &verse, &chorus, &verse, &chorus })
+            { song.copyFrom (0, at, *part, 0, 0, part->getNumSamples()); at += part->getNumSamples(); }
+            Rig r (song);
+            r.set ("engine", 2.0f);
+            std::vector<float> g; std::vector<int> sec;
+            for (int k = 0; k < 96; ++k)
+            {
+                r.run (1.0);
+                g.push_back (r.proc->evolve.growth());
+                sec.push_back (r.proc->evolve.uiSection.load());
+            }
+            std::printf ("   (growth/section every 4 s:");
+            for (int k = 3; k < 96; k += 4) std::printf (" %.2f/%d", g[(size_t) k], sec[(size_t) k]);
+            std::printf (")\n");
+            const float verse2End = g[71], chorus2 = g[79];      // 8 s into the second chorus
+            const bool sameIds = sec[20] == sec[68] && sec[44] == sec[92] && sec[20] != sec[44] && sec[20] >= 0;
+            check (sameIds, "evolve: recognises the returning verse and chorus", (float) sec[92]);
+            check (chorus2 > verse2End + 0.15f && chorus2 > g[47] - 0.05f, "evolve: chorus returns in full bloom (growth jump)", chorus2 - verse2End);
+        }
+
+        // Harmonised answers: a single-note melody in C major, then a pause
+        {
+            auto mel = plucks ({ 261.63f, 329.63f, 392.0f, 523.25f, 440.0f, 392.0f, 349.23f, 329.63f }, 0.5, 12.0);
+            juce::AudioBuffer<float> withPause (1, (int) (sr * 22.0));
+            withPause.clear();
+            withPause.copyFrom (0, 0, mel, 0, 0, mel.getNumSamples());
+            Rig r (withPause);
+            r.set ("engine", 2.0f); r.set ("chaos", 0.7f);
+            r.run (12.0);
+            float harmSeen = 0.0f;
+            juce::AudioBuffer<float> pause (2, 0);
+            for (int k = 0; k < 32; ++k)
+            {
+                auto part = r.run (0.25);
+                harmSeen = juce::jmax (harmSeen, r.proc->evolve.uiHarmony.load());
+                const int a = pause.getNumSamples();
+                pause.setSize (2, a + part.getNumSamples(), true);
+                for (int ch = 0; ch < 2; ++ch) pause.copyFrom (ch, a, part, ch, 0, part.getNumSamples());
+            }
+            double inKey = 0.0, all = 0.0;
+            for (int midi = 43; midi <= 95; ++midi)
+            {
+                const double e = goertzel (pause, 0, 440.0f * std::pow (2.0f, (float) (midi - 69) / 12.0f));
+                const int pc = midi % 12;
+                all += e;
+                if (pc == 0 || pc == 2 || pc == 4 || pc == 5 || pc == 7 || pc == 9 || pc == 11) inKey += e;
+            }
+            check (harmSeen > 0.5f, "evolve: answers get a harmony voice (level)", harmSeen);
+            check (inKey / all > 0.9, "evolve: harmonised answers stay in key (share)", (float) (inKey / all));
+        }
     }
 
     // Screenshots of the three engines

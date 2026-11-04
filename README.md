@@ -48,6 +48,16 @@ engine is a complex chain inside; the knobs are macros.
 | **MIX** | dry / wet | dry / wet | dry / wet |
 | **FREEZE** | holds the chord | holds the spectrum | holds the current stage and loops the sound |
 
+**EVOLVE also:**
+- **Smart drone**: holds the key's root as a pedal while it fits the chord. If a chord clashes with
+  it (e.g. E major's G# against A in A minor) it moves to a shared note or the chord's bass; a
+  clashing fifth becomes an octave. CHAOS lets it follow the chords more freely.
+- **Section memory**: it recognises returning parts of your song (by their notes and loudness).
+  A returning chorus jumps back to the bloom it had; a returning verse goes back to its calmer
+  state. The screen shows the section letter (`SEC A`, `SEC B`, ...).
+- **Harmonised answers**: when a remembered moment is a melody, the answer in a pause gets a
+  second voice a third above or a sixth below, in key (the screen shows `DUET`).
+
 ### The song brain
 
 All engines share a listener that builds a picture of the song while you play: **energy**
@@ -65,8 +75,9 @@ few seconds clearly differ from the last ~12 s). The screen shows `CALM`, `BUILD
 - **LOCK** keeps the current pattern; **double-click** the screen for a new variation (in EVOLVE
   this also resets its growth and memory).
 
-- **Auto key**: ChaosGrain FX listens to what you play and works out the key (shown on the screen,
-  e.g. `KEY A MIN`) and which notes you are playing (RESONATE shows them on its strings; EVOLVE shows
+- **Auto key**: ChaosGrain FX listens to what you play and works out the key from the notes it
+  tracks (overtones removed), the bass line and the chord on each 4-bar downbeat; it follows key
+  changes within about 10 s. It shows the key on the screen (e.g. `KEY A MIN`) and which notes you are playing (RESONATE shows them on its strings; EVOLVE shows
   a growing plant: one leaf per stage, a flower for SHIMMER, seeds for its memories).
   SPECTRAL tunes to the key. No key knob needed.
 - **Tempo** always follows the DAW (the grid step, 1/16 by default, is in the right-click menu).

@@ -32,6 +32,10 @@ public:
         bool minor = false, keyValid = false;
         KeyDetector::SongState song;
         std::array<float, 12> favourites {};
+        std::array<int, KeyDetector::maxNotes> chord {};   // notes being played now (MIDI, sorted)
+        int numChord = 0;
+        int section = 0;                                    // song brain's section counter
+        std::array<float, 12> colour {};                    // the last few seconds' notes (section fingerprint)
     };
 
     void prepare (double sampleRate, int maxBlock);
@@ -47,6 +51,9 @@ public:
     std::atomic<int> uiMemories { 0 };
     std::array<std::atomic<float>, 5> uiStage {};   // 0..1 per stage
     std::array<std::atomic<float>, numRes> uiResMidi {};
+    std::array<std::atomic<float>, numDrone> uiDroneMidi {};
+    std::atomic<int> uiSection { -1 };      // remembered section (0 = A, 1 = B ...), -1 = not known yet
+    std::atomic<float> uiHarmony { 0.0f };  // > 0 while an answer is harmonised
 
 private:
     struct Comb
@@ -66,11 +73,17 @@ private:
         float gain = 0.0f;
     };
 
-    struct Mark { long long at = 0; float strength = 0.0f; };
+    struct Mark { long long at = 0; float strength = 0.0f; int pc = -1; bool melody = false; };
+
+    // remembered song sections: their harmony + energy, and how grown EVOLVE was in them
+    struct Slot { std::array<float, 12> colour {}; float loudDb = -100.0f, growth = 0.0f; bool used = false; int age = 0; };
+    static constexpr int maxSlots = 6;
 
     void onBar (const Params& p);
     void onStep (const Params& p);
     void startRecall (const Params& p);
+    void updateDrone (const Params& p);
+    void identifySection (const Params& p);
 
     double sr = 44100.0;
     float grow = 0.0f, silentTime = 10.0f, playClock = 0.0f;
@@ -79,6 +92,16 @@ private:
     std::array<Voice, numRes> res;
     std::array<Voice, numDrone> drone;
     float droneLfo = 0.0f;
+    int chordMask = 0, droneMask = -1, dronePc = -1;
+    float chordStable = 0.0f;
+    juce::Random droneRng;
+
+    std::array<Slot, maxSlots> slots {};
+    int curSlot = -1, lastSection = 0, slotAge = 0;
+    float sectionTimer = -1.0f, growTarget = -1.0f, glideTime = 0.0f;
+    std::array<float, 16> growHistory {};   // growth every 0.5 s (section changes are noticed late)
+    int growHistPos = 0;
+    float growHistTimer = 0.0f;
 
     // echoes (ping-pong, crossfading between delay times)
     std::vector<float> echoL, echoR;
@@ -101,6 +124,8 @@ private:
     long long recallStart = 0;
     int recallLen = 0, recallDone = 0, stepsSinceRecall = 0;
     float recallGain = 0.0f, recallPan = 0.5f;
+    bool harmOn = false;
+    double harmPos = 0.0, harmRate = 1.0;
 
     // freeze loop over the output
     std::vector<float> loopL, loopR;
