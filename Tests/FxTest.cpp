@@ -237,7 +237,7 @@ int main (int argc, char** argv)
         const float b3 = bandEnergy (out, from, 246.94f), d4 = bandEnergy (out, from, 293.66f); // fifths of E3, G3
         check ((b3 + d4) / e3 > 0.02f, "resonate: sympathetic fifths ring (B3+D4 vs E3)", (b3 + d4) / e3);
         const float c2 = bandEnergy (out, from, 65.41f), c3 = bandEnergy (out, from, 130.81f);
-        check (c2 / c3 > 0.02f, "resonate: sympathetic octave below rings (C2 vs C3)", c2 / c3);
+        check (c2 / c3 > 0.02f && c2 / c3 < 0.6f, "resonate: sub octave rings, below the note (C2 vs C3)", c2 / c3);
 
         // stereo width: L and R are detuned pairs
         double lr = 0.0, ll = 0.0, rr = 0.0;
@@ -264,6 +264,33 @@ int main (int argc, char** argv)
         for (double s0 = 0.0; s0 < 2.0; s0 += 0.25) std::printf (" %.4f", rms (after, s0, s0 + 0.25));
         std::printf (")\n");
         check (ratio > 1.25f, "resonate: BLOOM swells after release (swell vs held end)", ratio);
+    }
+    {
+        // SHIMMER: with pure sine notes (no harmonics of their own) the octave and
+        // octave+fifth above can only come from the shimmer resonators. Low SHAPE, and early.
+        juce::AudioBuffer<float> sines (1, (int) (sr * 2.5));
+        sines.clear();
+        for (float f : cMajor)
+            for (int i = 0; i < sines.getNumSamples(); ++i)
+            {
+                const float tt = (float) i / (float) sr;
+                sines.addSample (0, i, 0.15f * std::sin (twoPi * f * tt) * juce::jmin (1.0f, tt / 0.01f));
+            }
+        Rig r (sines);
+        r.set ("engine", 0.0f); r.set ("mix", 1.0f); r.set ("chaos", 0.0f); r.set ("shape", 0.2f);
+        auto out = r.run (2.4);
+        auto shimmerAt = [&] (int from, int to)
+        {
+            juce::AudioBuffer<float> seg (2, to - from);
+            for (int ch = 0; ch < 2; ++ch) seg.copyFrom (ch, 0, out, ch, from, to - from);
+            const float up = bandEnergy (seg, 0, 261.63f) + bandEnergy (seg, 0, 329.63f) + bandEnergy (seg, 0, 392.0f)  // +12
+                           + bandEnergy (seg, 0, 392.0f * 1.0f) + bandEnergy (seg, 0, 493.88f) + bandEnergy (seg, 0, 587.33f); // +19
+            return up / juce::jmax (1.0e-9f, bandEnergy (seg, 0, 130.81f) + bandEnergy (seg, 0, 164.81f) + bandEnergy (seg, 0, 196.0f));
+        };
+        const float late = shimmerAt ((int) (1.4 * sr), (int) (2.4 * sr));
+        const float early = shimmerAt ((int) (0.2 * sr), (int) (0.7 * sr));
+        check (late > 0.02f, "resonate: shimmer at low SHAPE 0.2 (octave/oct+5th vs notes)", late);
+        check (early > 0.4f * late, "resonate: shimmer appears early (first 0.5 s vs later)", early / juce::jmax (1.0e-9f, late));
     }
     for (int bloom = 0; bloom < 2; ++bloom)
     {

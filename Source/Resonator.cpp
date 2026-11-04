@@ -5,8 +5,8 @@ namespace
 {
     constexpr float voicePan[6] = { 0.32f, 0.68f, 0.44f, 0.56f, 0.2f, 0.8f };
     constexpr int replayLen = 1440;                              // ~30 ms re-pluck
-    constexpr float sympInterval[3] = { -12.0f, 7.0f, 12.0f };   // octave down, fifth, octave up
-    constexpr float sympPan[3] = { 0.5f, 0.15f, 0.85f };
+    constexpr float sympInterval[4] = { -12.0f, 7.0f, 12.0f, 19.0f }; // octave down, fifth, octave up, octave+fifth up
+    constexpr float sympPan[4] = { 0.5f, 0.3f, 0.9f, 0.1f };          // shimmer layers spread wide
 }
 
 float Resonator::Comb::tick (float in, float g, float damp, float glide)
@@ -59,6 +59,7 @@ void Resonator::reset()
     envIn = 0.0f; envPeak = 1.0e-4f; duckGain = 1.0f;
     bowNoise.setSeed (0x5eed);
     hpState = 0.0f;
+    kick = 0.0f;
     clock.reset();
 }
 
@@ -84,6 +85,8 @@ void Resonator::setNotes (const int* notes, int count)
     for (int v = 0; v < numVoices; ++v)
         if (next[(size_t) v] >= 0 || voiceNote[(size_t) v] >= 0)
             lastNote[(size_t) v] = next[(size_t) v] >= 0 ? next[(size_t) v] : voiceNote[(size_t) v];
+    for (int k = 0; k < count; ++k)
+        if (std::find (voiceNote.begin(), voiceNote.end(), notes[k]) == voiceNote.end()) { kick = 1.0f; break; } // a new note
     voiceNote = next; // released voices ring out on their last note, new ones glide into tune
 }
 
@@ -122,17 +125,20 @@ void Resonator::process (const float* inL, const float* inR, float* outL, float*
 
     const float s = juce::jlimit (0.0f, 1.0f, p.shape);
     const float t60 = p.freeze ? 1000.0f : 0.4f * std::pow (120.0f, s);   // 0.4 s .. ~48 s
-    const float sympAmt = 0.3f + 0.7f * s;                                 // sympathetic strings
-    const float shimmer = juce::jlimit (0.0f, 1.0f, (s - 0.45f) / 0.55f);  // octave up grows in
-    const float sympGain[3] = { 0.8f * sympAmt, 0.6f * sympAmt, 0.5f * sympAmt * shimmer };
+    const float sympAmt = 0.45f + 0.55f * s;                               // sympathetic strings
+    const float shimmer = 0.35f + 0.65f * s;                               // there from the start, grows with SHAPE
+    const float sympGain[4] = { 0.8f * sympAmt, 0.6f * sympAmt, 0.75f * sympAmt * shimmer, 0.55f * sympAmt * shimmer };
     const float duckDepth = p.freeze ? 0.0f : 0.6f + 0.3f * s;             // BLOOM: duck while playing
     const float swell = p.freeze ? 1.0f : 1.0f + 0.75f * s;                //        lift after release
-    const float bloomRise = 0.1f + 0.8f * s;                               // seconds
+    const float bloomRise = 0.05f + 0.5f * s;                              // seconds: swells sooner
     const float bowAmt = 0.15f + 0.35f * s;                                // gentle "bowing" excitation
     const float fc = 8500.0f - 4500.0f * s;                                // warmer as it grows
     const float damp = 1.0f - std::exp (-juce::MathConstants<float>::twoPi * fc / (float) sr);
     const float subHz = 260.0f;                                            // octave below = warm, round sub
     const float dampSub = 1.0f - std::exp (-juce::MathConstants<float>::twoPi * subHz / (float) sr);
+    const float brightHz = 12000.0f;                                       // shimmer layers sparkle
+    const float dampBright = 1.0f - std::exp (-juce::MathConstants<float>::twoPi * brightHz / (float) sr);
+    const float kickDecay = std::exp (-1.0f / (0.25f * (float) sr));
     const float glide = 1.0f - std::exp (-1.0f / (0.015f * (float) sr));
     const float gainRamp = 1.0f - std::exp (-1.0f / (0.05f * (float) sr));
     const float hpA = std::exp (-juce::MathConstants<float>::twoPi * 60.0f / (float) sr);
@@ -160,9 +166,11 @@ void Resonator::process (const float* inL, const float* inR, float* outL, float*
         for (int k = 0; k < numSymp; ++k)
         {
             float interval = sympInterval[k];
-            if (k == 1 && scaleIdx > 0) // keep the fifth inside the key
-                interval = GrainEngine::snapToScale ((float) ((note - p.keyRoot) % 12 + 12 + 7), scaleIdx) - (float) ((note - p.keyRoot) % 12 + 12);
-            tune (symp[(size_t) v][(size_t) k], (float) note + interval - drift / 200.0f, vt60, gS[(size_t) v][(size_t) k], k == 0 ? subHz : fc);
+            if ((k == 1 || k == 3) && scaleIdx > 0) // keep the fifths inside the key
+                interval = GrainEngine::snapToScale ((float) ((note - p.keyRoot) % 12 + 12 + 7), scaleIdx) - (float) ((note - p.keyRoot) % 12 + 12)
+                         + (k == 3 ? 12.0f : 0.0f);
+            tune (symp[(size_t) v][(size_t) k], (float) note + interval - drift / 200.0f, vt60, gS[(size_t) v][(size_t) k],
+                  k == 0 ? subHz : k >= 2 ? brightHz : fc);
         }
         inGain[(size_t) v] = (p.freeze || ! active) ? 0.0f : (1.0f - gL[(size_t) v]) * 3.0f + 0.02f;
         bowScale[(size_t) v] = (p.freeze || ! active) ? 0.0f : std::sqrt (juce::jmax (1.0e-6f, 1.0f - gL[(size_t) v]));
@@ -196,6 +204,9 @@ void Resonator::process (const float* inL, const float* inR, float* outL, float*
             if (++replayPos >= replayLen) replayPos = -1;
         }
 
+        kick *= kickDecay;
+        const float kickBoost = 1.0f + 8.0f * kick;
+
         float l = 0.0f, r = 0.0f;
         for (int v = 0; v < numVoices; ++v)
         {
@@ -219,8 +230,11 @@ void Resonator::process (const float* inL, const float* inR, float* outL, float*
             {
                 // Bowed only: fed with your sound they would just ring on your own harmonics
                 // (C2's 2nd harmonic is C3); bowed, they sing their own pitch.
-                const float y = symp[(size_t) v][(size_t) k].tick (bow * (k == 0 ? 90.0f : 26.0f), gS[(size_t) v][(size_t) k],
-                                                                   k == 0 ? dampSub : damp, glide) * sympGain[k];
+                // new notes give the sympathetic tones a kick, so they ring at once
+                const float boost = k >= 2 ? kickBoost : k == 1 ? 1.0f + 0.5f * (kickBoost - 1.0f) : 1.0f; // sub stays calm
+                const float y = symp[(size_t) v][(size_t) k].tick (bow * boost * (k == 0 ? 90.0f : k >= 2 ? 34.0f : 26.0f),
+                                                                   gS[(size_t) v][(size_t) k],
+                                                                   k == 0 ? dampSub : k >= 2 ? dampBright : damp, glide) * sympGain[k];
                 sl += y * std::cos (sympPan[k] * juce::MathConstants<float>::halfPi);
                 sr2 += y * std::sin (sympPan[k] * juce::MathConstants<float>::halfPi);
             }

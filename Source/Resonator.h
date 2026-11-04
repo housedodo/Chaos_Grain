@@ -17,7 +17,7 @@
 class Resonator
 {
 public:
-    static constexpr int numVoices = 6, numSymp = 3;
+    static constexpr int numVoices = 6, numSymp = 4;
 
     struct Params
     {
@@ -58,7 +58,7 @@ private:
 
     double sr = 44100.0;
     std::array<Comb, numVoices> combL, combR;                       // detuned pair per note
-    std::array<std::array<Comb, numSymp>, numVoices> symp;          // octave down, fifth, octave up
+    std::array<std::array<Comb, numSymp>, numVoices> symp;          // octave down, fifth, octave up, octave+fifth up
     std::array<int, numVoices> voiceNote {}, lastNote {};
     std::array<float, numVoices> gain {}, level {}, lfo {};
     std::array<int, numVoices> heldNotes {};
@@ -75,4 +75,5 @@ private:
     juce::int64 seed = 1;
     std::atomic<bool> newVoicing { false };
     float hpState = 0.0f;
+    float kick = 0.0f;        // extra bowing right after new notes: sympathetic tones ring at once
 };
