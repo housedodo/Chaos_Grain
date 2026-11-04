@@ -51,6 +51,117 @@ namespace
 
     float midiHz (int m) { return 440.0f * std::pow (2.0f, (float) (m - 69) / 12.0f); }
 
+    // Demo 4: EVOLVE growing over a minute (Am7 - Fmaj7 - Cmaj7 - G6: keys, guitar, pads, a pause)
+    bool evolveDemo = false;
+    constexpr double evolveLength = 92.0, pauseStart = 64.0, pauseEnd = 76.0;
+
+    juce::AudioBuffer<float> makeEvolve()
+    {
+        juce::AudioBuffer<float> b (1, (int) (evolveLength * sr));
+        b.clear();
+        juce::Random rnd (7);
+        auto add = [&] (int i, float v) { if (i >= 0 && i < b.getNumSamples()) b.addSample (0, i, v); };
+        auto pad = [&] (const std::vector<int>& notes, double t0, double dur)
+        {
+            for (int m : notes)
+                for (float det : { -0.06f, 0.06f })
+                {
+                    const float f = midiHz (m) * std::pow (2.0f, det / 12.0f);
+                    for (int i = 0; i < (int) ((dur + 0.4) * sr); ++i)
+                    {
+                        const float tt = (float) i / (float) sr;
+                        float v = 0.0f;
+                        for (int h = 1; h <= 14 && f * (float) h < 8000.0f; ++h) v += std::sin (twoPi * f * (float) h * tt) / std::pow ((float) h, 1.4f);
+                        const float env = juce::jmin (1.0f, tt / 0.4f) * (tt < dur ? 1.0f : std::exp (-(tt - (float) dur) / 0.12f));
+                        add ((int) (t0 * sr) + i, 0.025f * v * env);
+                    }
+                }
+        };
+        auto ep = [&] (const std::vector<int>& notes, double t0, double dur)
+        {
+            for (int m : notes)
+            {
+                const float f = midiHz (m);
+                for (int i = 0; i < (int) ((dur + 0.3) * sr); ++i)
+                {
+                    const float tt = (float) i / (float) sr;
+                    const float idx = 1.6f * std::exp (-tt / 0.12f) + 0.25f;
+                    const float v = std::sin (twoPi * f * tt + idx * std::sin (twoPi * f * tt));
+                    const float env = std::exp (-tt / 1.1f) * (tt < dur ? 1.0f : std::exp (-(tt - (float) dur) / 0.08f));
+                    add ((int) (t0 * sr) + i, 0.09f * v * env * (1.0f + 0.15f * std::sin (twoPi * 5.0f * tt)));
+                }
+            }
+        };
+        auto pluck = [&] (int m, double t0, double dur)
+        {
+            const int period = juce::jmax (2, (int) std::lround (sr / midiHz (m)));
+            std::vector<float> line ((size_t) period);
+            for (auto& v : line) v = rnd.nextFloat() * 2.0f - 1.0f;
+            int idx = 0; float prev = 0.0f;
+            for (int i = 0; i < (int) (dur * sr); ++i)
+            {
+                const float y = line[(size_t) idx];
+                line[(size_t) idx] = 0.5f * (y + prev) * 0.996f;
+                prev = y;
+                if (++idx >= period) idx = 0;
+                add ((int) (t0 * sr) + i, 0.15f * y * juce::jmin (1.0f, (float) i / 40.0f));
+            }
+        };
+
+        const std::vector<std::vector<int>> chords = { { 45, 55, 60, 64 }, { 41, 52, 57, 60 }, { 48, 55, 59, 64 }, { 43, 52, 55, 59 } };
+        const std::vector<std::vector<int>> arps = { { 45, 52, 57, 60, 64, 60 }, { 41, 48, 53, 57, 60, 57 }, { 48, 52, 55, 59, 64, 59 }, { 43, 50, 55, 59, 62, 59 } };
+        for (double t0 = 0.0; t0 < 20.0; t0 += 2.0)                 // 0-20 s: sparse keys
+        {
+            const auto& c = chords[(size_t) ((int) (t0 / 2.0) % 4)];
+            ep (c, t0, 0.9);
+            ep ({ c[2], c[3] }, t0 + 1.0, 0.5);
+        }
+        for (double t0 = 20.0; t0 < 44.0; t0 += 0.25)                // 20-44 s: busy guitar
+        {
+            const int k = (int) ((t0 - 20.0) / 2.0) % 4, s8 = (int) std::lround ((t0 - 20.0) / 0.25) % 8;
+            pluck (arps[(size_t) k][(size_t) (s8 % 6)], t0, 1.4);
+        }
+        for (double t0 = 44.0; t0 < pauseStart - 0.5; t0 += 2.0)    // 44-64 s: pad + guitar
+        {
+            const int k = (int) ((t0 - 44.0) / 2.0) % 4;
+            pad (chords[(size_t) k], t0, 1.9);
+            for (int s8 = 0; s8 < 8; ++s8) if (s8 % 2 == 0) pluck (arps[(size_t) k][(size_t) (s8 % 6)] + 12, t0 + s8 * 0.25, 1.2);
+        }
+        for (double t0 = pauseEnd; t0 < 86.0; t0 += 2.0)            // after the pause: keys again
+        {
+            const auto& c = chords[(size_t) ((int) ((t0 - pauseEnd) / 2.0) % 4)];
+            ep (c, t0, 0.9);
+            ep ({ c[2], c[3] }, t0 + 1.0, 0.5);
+        }
+        return b;
+    }
+
+    juce::String evolveInput (double t)
+    {
+        static const char* names[4] = { "AM7", "FMAJ7", "CMAJ7", "G6" };
+        if (t < 20.0) return juce::String ("KEYS  ") + names[(int) (t / 2.0) % 4];
+        if (t < 44.0) return juce::String ("GUITAR  ") + names[(int) ((t - 20.0) / 2.0) % 4];
+        if (t < pauseStart) return juce::String ("PAD+GTR  ") + names[(int) ((t - 44.0) / 2.0) % 4];
+        if (t < pauseEnd) return "- (PAUSE)";
+        if (t < 86.0) return juce::String ("KEYS  ") + names[(int) ((t - pauseEnd) / 2.0) % 4];
+        return "-";
+    }
+
+    Caption evolveCaption (double t, int stage)
+    {
+        if (t >= 86.0)      return { 0, "", "EVOLVE", { "SHAPE = GROWTH SPEED", "CHAOS = HOW MUCH IT IMPROVISES", "DOUBLE-CLICK = START OVER" } };
+        if (t >= pauseEnd)  return { 0, "PLAY AGAIN", "IT GOES ON", { "IT PICKS UP WHERE IT WAS -", "THE PLANT KEEPS ITS GROWTH." } };
+        if (t >= pauseStart + 0.8) return { 0, "IN THE PAUSE", "ANSWERS", { "IT PLAYS BACK MOMENTS IT", "REMEMBERED: REVERSED, AN", "OCTAVE UP OR HALF SPEED." } };
+        switch (stage)
+        {
+            case 0:  return { 0, "STAGE 1", "SPACE", { "EVOLVE GROWS WHILE YOU PLAY:", "ABOUT ONE MINUTE TO FULL.", "FIRST JUST A WIDENING ROOM." } };
+            case 1:  return { 0, "STAGE 2", "RESONATE", { "THE NOTES YOU PLAY MOST", "START TO RING ON." } };
+            case 2:  return { 0, "STAGE 3", "ECHOES", { "ECHOES IN YOUR TEMPO:", "BUSY PLAYING = SHORT,", "SPARSE PLAYING = LONG." } };
+            case 3:  return { 0, "STAGE 4", "DRONE", { "A LOW DRONE ON THE ROOT", "AND FIFTH OF YOUR KEY." } };
+            default: return { 0, "STAGE 5", "SHIMMER", { "OCTAVE-UP SHIMMER IN THE", "ECHOES - THE LAST STAGE." } };
+        }
+    }
+
     juce::AudioBuffer<float> makeShowcase()
     {
         const double total = 150.0;
@@ -183,6 +294,7 @@ namespace
     juce::AudioBuffer<float> makePhrase()
     {
         if (showcaseDemo) return makeShowcase();
+        if (evolveDemo) return makeEvolve();
         juce::AudioBuffer<float> b (1, (int) ((resonateDemo ? 8.0 : phrase) * sr));
         b.clear();
         auto saw = [&] (float f, double t0, double t1)
@@ -215,12 +327,13 @@ int main (int argc, char** argv)
     if (argc < 2) { std::puts ("usage: DemoFx <outdir> [resonate]"); return 2; }
     resonateDemo = argc > 2 && juce::String (argv[2]) == "resonate";
     showcaseDemo = argc > 2 && juce::String (argv[2]) == "showcase";
+    evolveDemo = argc > 2 && juce::String (argv[2]) == "evolve";
 
     const juce::File outDir (argv[1]);
     outDir.createDirectory();
     const auto videoOnly = outDir.getChildFile ("video_only.mp4");
     const auto audioFile = outDir.getChildFile ("audio.wav");
-    const auto finalFile = outDir.getChildFile (showcaseDemo ? "ChaosGrainFX_showcase.mp4"
+    const auto finalFile = outDir.getChildFile (evolveDemo ? "ChaosGrainFX_evolve_demo.mp4" : showcaseDemo ? "ChaosGrainFX_showcase.mp4"
                                               : resonateDemo ? "ChaosGrainFX_resonate_demo.mp4" : "ChaosGrainFX_demo.mp4");
 
     std::unique_ptr<ChaosGrainProcessor> proc (static_cast<ChaosGrainProcessor*> (createPluginFilter()));
@@ -243,7 +356,7 @@ int main (int argc, char** argv)
     retro::ditherGradient (bgLow, bgLow.getBounds(), juce::Colour (0xff24222b), juce::Colour (0xff0d0c11), 6);
 
     const auto input = makePhrase();
-    const double duration = showcaseDemo ? 150.0 : resonateDemo ? 74.0 : 96.0;
+    const double duration = evolveDemo ? evolveLength : showcaseDemo ? 150.0 : resonateDemo ? 74.0 : 96.0;
     const int totalFrames = (int) (duration * fps);
     juce::AudioBuffer<float> audio (2, totalFrames * blocksPerFrame * blockSize);
     audio.clear();
@@ -265,7 +378,12 @@ int main (int argc, char** argv)
         const double t = (double) f / fps;
 
  // ---------------- Script ----------------
-        if (showcaseDemo)
+        if (evolveDemo)
+        {
+            setP ("engine", 2.0f); setP ("shape", 0.35f); setP ("chaos", 0.5f);
+            setP ("mix", t < 86.0 ? 0.65f : sweep (t, 88.0, evolveLength, 0.65f, 0.0f));
+        }
+        else if (showcaseDemo)
         {
             struct Scene { double t; int engine; float shape, chaos, mix; };
             static const Scene scenes[] = {
@@ -340,7 +458,10 @@ int main (int argc, char** argv)
             g.drawImageAt (snap, plugArea.getX(), plugArea.getY());
 
             const int cx = plugArea.getRight() + 50, cw = W - cx - 30;
-            const auto& cap = captionAt (t);
+            int stage = 0;
+            for (int k = 1; k < 5; ++k) if (proc->evolve.uiStage[(size_t) k].load() > 0.5f) stage = k;
+            const Caption evoCap = evolveCaption (t, stage);
+            const auto& cap = evolveDemo ? evoCap : captionAt (t);
             int y = 120;
             if (juce::String (cap.step).isNotEmpty())
                 retro::pixelText (g, cap.step, { cx, y, cw, 20 }, retro::pal::yellow, juce::Justification::topLeft, 2);
@@ -355,7 +476,16 @@ int main (int argc, char** argv)
 
             // What is being played right now
             juce::String playing;
-            if (showcaseDemo) playing = showcaseInput (t);
+            if (evolveDemo)
+            {
+                playing = evolveInput (t);
+                const int gp = juce::roundToInt (proc->evolve.uiGrowth.load() * 100.0f);
+                const int secs = (int) t;
+                const juce::String clock = juce::String (secs / 60) + ":" + juce::String (secs % 60).paddedLeft ('0', 2);
+                retro::pixelText (g, "GROWTH " + juce::String (gp) + "%" + (gp == 100 ? " FULL" : "") + "   TIME " + clock,
+                                  { cx, 372, cw, 20 }, retro::pal::yellow, juce::Justification::topLeft, 2);
+            }
+            else if (showcaseDemo) playing = showcaseInput (t);
             else if (resonateDemo)
             {
                 const double ph2 = std::fmod (t, 8.0);

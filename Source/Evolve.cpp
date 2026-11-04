@@ -233,7 +233,7 @@ void Evolve::process (const float* inL, const float* inR, float* outL, float* ou
     if (! p.freeze)
     {
         const float T = growSeconds (p.shape);
-        if (silentTime < 0.6f) grow += dt / T;
+        if (silentTime < 1.5f) grow += dt / T;   // short gaps between phrases still count as playing
         else if (silentTime > 4.0f) grow -= dt / (0.75f * T);
         grow = juce::jlimit (0.0f, 1.0f, grow);
     }
@@ -419,8 +419,8 @@ void Evolve::process (const float* inL, const float* inR, float* outL, float* ou
         }
         else shimOut = 0.0f;
 
-        float l = directG * xl + resL + tl + dL + shL + rec * (1.0f - recallPan) * 1.2f;
-        float r = directG * xr + resR + tr + dR + shR + rec * recallPan * 1.2f;
+        float l = directG * xl + resL + tl + dL + shL + rec * (1.0f - recallPan) * 2.4f;
+        float r = directG * xr + resR + tr + dR + shR + rec * recallPan * 2.4f;
 
         // FREEZE: loop the last two seconds seamlessly
         const int ln = (int) loopL.size();
