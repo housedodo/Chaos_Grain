@@ -31,6 +31,123 @@ namespace
     };
     bool resonateDemo = false;
 
+    // Demo 3: SHOWCASE - ambient pads, chillwave keys and guitar through every engine
+    const std::vector<Caption> showcaseCaptions = {
+        { 0.0,   "AMBIENT",   "DRY PAD",        { "SOFT PAD CHORDS:", "CMAJ7 - AM9 - FMAJ7 - G6." } },
+        { 5.0,   "AMBIENT",   "RESONATE",       { "SHAPE 85%, CHAOS 30%: BLOOM,", "SUB OCTAVE, FIFTHS AND", "SHIMMER - AN ENDLESS PAD." } },
+        { 20.0,  "AMBIENT",   "UNISON",         { "SPECTRAL, SHAPE 50%: EVERY", "PARTIAL DETUNED LEFT/RIGHT", "- A WIDE, WARM WALL." } },
+        { 34.0,  "AMBIENT",   "RAINBOW",        { "SPECTRAL, SHAPE 92%: LOWS", "ECHO FIRST, HIGHS LATER,", "REPEATS CLIMB AN OCTAVE." } },
+        { 48.0,  "CHILLWAVE", "DRY KEYS",       { "ELECTRIC PIANO STABS:", "DM7 - G7 - CMAJ7 - AM7." } },
+        { 53.0,  "CHILLWAVE", "WARBLE",         { "SPECTRAL UNISON, CHAOS 50%:", "DRIFTING DETUNE - THAT", "WOBBLY TAPE-CHORUS FEEL." } },
+        { 68.0,  "CHILLWAVE", "PATTERN",        { "CHAOS 35%: ARPS AND", "CASCADES OF YOUR CHORDS,", "ALWAYS IN KEY." } },
+        { 83.0,  "CHILLWAVE", "BLOOM",          { "RESONATE 65%: THE CHORD", "SWELLS UP BETWEEN THE", "STABS." } },
+        { 96.0,  "GUITAR",    "DRY GUITAR",     { "CLEAN PLUCKED ARPEGGIOS:", "EM - C - G - D." } },
+        { 101.0, "GUITAR",    "RAINBOW DELAY",  { "SPECTRAL 80%: EVERY NOTE", "SPLITS INTO CASCADING", "ECHOES." } },
+        { 116.0, "GUITAR",    "POST-ROCK PAD",  { "RESONATE 90%: SHIMMERING", "SWELLS UNDER THE PICKING." } },
+        { 131.0, "GUITAR",    "GLITCH",         { "PATTERN, CHAOS 75%:", "SHUFFLES AND STUTTERS", "ON THE GRID." } },
+        { 143.0, "",          "FREEZE",         { "HOLD IT ALL AND FADE." } },
+    };
+    bool showcaseDemo = false;
+
+    float midiHz (int m) { return 440.0f * std::pow (2.0f, (float) (m - 69) / 12.0f); }
+
+    juce::AudioBuffer<float> makeShowcase()
+    {
+        const double total = 150.0;
+        juce::AudioBuffer<float> b (1, (int) (total * sr));
+        b.clear();
+        juce::Random rnd (42);
+        auto add = [&] (int i, float v) { if (i >= 0 && i < b.getNumSamples()) b.addSample (0, i, v); };
+
+        // Soft pad: two slightly detuned mellow saws, slow attack
+        auto pad = [&] (const std::vector<int>& notes, double t0, double dur)
+        {
+            for (int m : notes)
+                for (float det : { -0.06f, 0.06f })
+                {
+                    const float f = midiHz (m) * std::pow (2.0f, det / 12.0f);
+                    for (int i = 0; i < (int) ((dur + 0.4) * sr); ++i)
+                    {
+                        const float tt = (float) i / (float) sr;
+                        float s = 0.0f;
+                        for (int h = 1; h <= 14 && f * (float) h < 8000.0f; ++h) s += std::sin (twoPi * f * (float) h * tt) / std::pow ((float) h, 1.4f);
+                        const float env = juce::jmin (1.0f, tt / 0.4f) * (tt < dur ? 1.0f : std::exp (-(tt - (float) dur) / 0.12f));
+                        add ((int) (t0 * sr) + i, 0.035f * s * env);
+                    }
+                }
+        };
+        // Electric piano: FM tine with a decaying bright attack
+        auto ep = [&] (const std::vector<int>& notes, double t0, double dur)
+        {
+            for (int m : notes)
+            {
+                const float f = midiHz (m);
+                for (int i = 0; i < (int) ((dur + 0.3) * sr); ++i)
+                {
+                    const float tt = (float) i / (float) sr;
+                    const float idx = 1.6f * std::exp (-tt / 0.12f) + 0.25f;
+                    const float s = std::sin (twoPi * f * tt + idx * std::sin (twoPi * f * tt));
+                    const float env = std::exp (-tt / 1.1f) * (tt < dur ? 1.0f : std::exp (-(tt - (float) dur) / 0.08f));
+                    add ((int) (t0 * sr) + i, 0.09f * s * env * (1.0f + 0.15f * std::sin (twoPi * 5.0f * tt)));
+                }
+            }
+        };
+        // Plucked guitar string (Karplus-Strong)
+        auto pluck = [&] (int m, double t0, double dur)
+        {
+            const int period = juce::jmax (2, (int) std::lround (sr / midiHz (m)));
+            std::vector<float> line ((size_t) period);
+            for (auto& v : line) v = rnd.nextFloat() * 2.0f - 1.0f;
+            int idx = 0; float prev = 0.0f;
+            for (int i = 0; i < (int) (dur * sr); ++i)
+            {
+                const float y = line[(size_t) idx];
+                const float nxt = 0.5f * (y + prev) * 0.996f;
+                prev = y;
+                line[(size_t) idx] = nxt;
+                if (++idx >= period) idx = 0;
+                add ((int) (t0 * sr) + i, 0.16f * y * juce::jmin (1.0f, (float) i / 40.0f));
+            }
+        };
+
+        // Ambient 0-48 s
+        const std::vector<std::vector<int>> padChords = { { 48, 52, 55, 59 }, { 45, 48, 52, 55, 59 }, { 41, 45, 48, 52 }, { 43, 47, 50, 52 } };
+        for (int rep = 0; rep < 3; ++rep)
+            for (int k = 0; k < 4; ++k) pad (padChords[(size_t) k], rep * 16.0 + k * 4.0, 3.4);
+
+        // Chillwave 48-96 s
+        const std::vector<std::vector<int>> epChords = { { 50, 53, 57, 60 }, { 43, 53, 59, 62 }, { 48, 52, 55, 59 }, { 45, 55, 60, 64 } };
+        for (int rep = 0; rep < 6; ++rep)
+            for (int k = 0; k < 4; ++k)
+            {
+                const double t0 = 48.0 + rep * 8.0 + k * 2.0;
+                ep (epChords[(size_t) k], t0, 0.7);
+                ep (epChords[(size_t) k], t0 + 1.0, 0.45);
+            }
+
+        // Guitar 96-150 s: eighth-note arpeggios
+        const std::vector<std::vector<int>> gtr = { { 40, 47, 52, 55, 59, 64 }, { 48, 52, 55, 60, 64, 60 }, { 43, 47, 50, 55, 59, 67 }, { 50, 57, 62, 66, 62, 57 } };
+        for (int rep = 0; rep < 7; ++rep)
+            for (int k = 0; k < 4; ++k)
+                for (int s = 0; s < 8; ++s)
+                {
+                    const double t0 = 96.0 + rep * 8.0 + k * 2.0 + s * 0.25;
+                    if (t0 < 146.0) pluck (gtr[(size_t) k][(size_t) (s % 6)], t0, 1.6);
+                }
+        return b;
+    }
+
+    juce::String showcaseInput (double t)
+    {
+        static const char* pads[4] = { "PAD  CMAJ7", "PAD  AM9", "PAD  FMAJ7", "PAD  G6" };
+        static const char* eps[4] = { "KEYS  DM7", "KEYS  G7", "KEYS  CMAJ7", "KEYS  AM7" };
+        static const char* gt[4] = { "GUITAR  EM", "GUITAR  C", "GUITAR  G", "GUITAR  D" };
+        if (t < 48.0) return pads[(int) (std::fmod (t, 16.0) / 4.0)];
+        if (t < 96.0) return eps[(int) (std::fmod (t - 48.0, 8.0) / 2.0)];
+        if (t < 146.0) return gt[(int) (std::fmod (t - 96.0, 8.0) / 2.0)];
+        return "-";
+    }
+
     const std::vector<Caption> captions = {
         { 0.0,  "",            "CHAOS GRAIN FX", { "THE INPUT: ONE SAW NOTE (A3),", "THEN A SAW CHORD (A MINOR).", "MIX 0% = JUST THE DRY SOUND." } },
         { 8.0,  "ENGINE 1",    "RESONATE",       { "RESONATORS TUNE TO THE NOTES", "YOU PLAY AND RING ON IN YOUR", "OWN SOUND. SHAPE LOW = ECHO." } },
@@ -49,7 +166,7 @@ namespace
 
     const Caption& captionAt (double t)
     {
-        const auto& list = resonateDemo ? resonateCaptions : captions;
+        const auto& list = showcaseDemo ? showcaseCaptions : resonateDemo ? resonateCaptions : captions;
         const Caption* c = &list.front();
         for (auto& x : list) if (t >= x.start) c = &x;
         return *c;
@@ -65,6 +182,7 @@ namespace
     // The RESONATE demo uses a slower 8 s phrase with gaps so BLOOM can be heard.
     juce::AudioBuffer<float> makePhrase()
     {
+        if (showcaseDemo) return makeShowcase();
         juce::AudioBuffer<float> b (1, (int) ((resonateDemo ? 8.0 : phrase) * sr));
         b.clear();
         auto saw = [&] (float f, double t0, double t1)
@@ -96,12 +214,14 @@ int main (int argc, char** argv)
     juce::ScopedJuceInitialiser_GUI init;
     if (argc < 2) { std::puts ("usage: DemoFx <outdir> [resonate]"); return 2; }
     resonateDemo = argc > 2 && juce::String (argv[2]) == "resonate";
+    showcaseDemo = argc > 2 && juce::String (argv[2]) == "showcase";
 
     const juce::File outDir (argv[1]);
     outDir.createDirectory();
     const auto videoOnly = outDir.getChildFile ("video_only.mp4");
     const auto audioFile = outDir.getChildFile ("audio.wav");
-    const auto finalFile = outDir.getChildFile (resonateDemo ? "ChaosGrainFX_resonate_demo.mp4" : "ChaosGrainFX_demo.mp4");
+    const auto finalFile = outDir.getChildFile (showcaseDemo ? "ChaosGrainFX_showcase.mp4"
+                                              : resonateDemo ? "ChaosGrainFX_resonate_demo.mp4" : "ChaosGrainFX_demo.mp4");
 
     std::unique_ptr<ChaosGrainProcessor> proc (static_cast<ChaosGrainProcessor*> (createPluginFilter()));
     proc->setPlayConfigDetails (2, 2, sr, blockSize);
@@ -123,7 +243,7 @@ int main (int argc, char** argv)
     retro::ditherGradient (bgLow, bgLow.getBounds(), juce::Colour (0xff24222b), juce::Colour (0xff0d0c11), 6);
 
     const auto input = makePhrase();
-    const double duration = resonateDemo ? 74.0 : 96.0;
+    const double duration = showcaseDemo ? 150.0 : resonateDemo ? 74.0 : 96.0;
     const int totalFrames = (int) (duration * fps);
     juce::AudioBuffer<float> audio (2, totalFrames * blocksPerFrame * blockSize);
     audio.clear();
@@ -145,7 +265,26 @@ int main (int argc, char** argv)
         const double t = (double) f / fps;
 
  // ---------------- Script ----------------
-        if (resonateDemo)
+        if (showcaseDemo)
+        {
+            struct Scene { double t; int engine; float shape, chaos, mix; };
+            static const Scene scenes[] = {
+                { 0.0, 0, 0.85f, 0.3f, 0.0f },   { 5.0, 0, 0.85f, 0.3f, 0.65f },  { 20.0, 1, 0.5f, 0.3f, 0.6f },
+                { 34.0, 1, 0.92f, 0.2f, 0.6f },  { 48.0, 1, 0.55f, 0.5f, 0.0f },  { 53.0, 1, 0.55f, 0.5f, 0.55f },
+                { 68.0, 2, 0.45f, 0.35f, 0.5f }, { 83.0, 0, 0.65f, 0.25f, 0.6f }, { 96.0, 1, 0.8f, 0.15f, 0.0f },
+                { 101.0, 1, 0.8f, 0.15f, 0.55f },{ 116.0, 0, 0.9f, 0.35f, 0.6f }, { 131.0, 2, 0.4f, 0.75f, 0.5f },
+                { 143.0, 0, 0.95f, 0.35f, 0.6f } };
+            const Scene* sc = &scenes[0];
+            const Scene* prev = &scenes[0];
+            for (auto& s : scenes) if (t >= s.t) { prev = sc; sc = &s; }
+            setP ("engine", (float) sc->engine);
+            setP ("shape", sc->shape);
+            setP ("chaos", sc->chaos);
+            // MIX glides in over a second when a processed scene starts
+            setP ("mix", sweep (t, sc->t, sc->t + 1.0, prev == sc ? sc->mix : prev->mix, sc->mix));
+            if (t >= 144.0) { setP ("freeze", 1.0f); setP ("mix", sweep (t, 147.0, 150.0, 0.6f, 0.0f)); }
+        }
+        else if (resonateDemo)
         {
             setP ("engine", 0.0f);
             if (t < 8.0)       { setP ("mix", 0.0f); setP ("shape", 0.3f); setP ("chaos", 0.05f); }
@@ -215,8 +354,9 @@ int main (int argc, char** argv)
             }
 
             // What is being played right now
-            const char* playing;
-            if (resonateDemo)
+            juce::String playing;
+            if (showcaseDemo) playing = showcaseInput (t);
+            else if (resonateDemo)
             {
                 const double ph2 = std::fmod (t, 8.0);
                 playing = ph2 < 1.0 ? "NOTE  A3" : (ph2 >= 2.0 && ph2 < 3.3) ? "CHORD A MINOR"
