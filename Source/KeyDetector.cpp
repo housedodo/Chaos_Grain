@@ -53,6 +53,7 @@ void KeyDetector::reset()
     shortChroma.fill (0.0f); longChroma.fill (0.0f); sectionChroma.fill (0.0f);
     prevMag.fill (0.0f); prevOnset = false; noteUse.fill (0.0f); recentUse.fill (0.0f);
     noteChroma.fill (0.0f); bassHist.fill (0.0f); homeHist.fill (0.0f);
+    pcEvidence.fill (0.0f); bassEvidence.fill (0.0f); numChord = chordMask = 0; chordBass = -1; changeHeld = 0.0f; onsets = 0;
     silentFor = 100.0f; notesFresh = false; phraseStart = true; downbeatFrames = -1;
     shortBright = longBright = 0.5f; shortEnergy = longEnergy = 0.0f;
     uiRoot.store (-1);
@@ -111,6 +112,7 @@ void KeyDetector::analyse()
         return;
     }
     trackNotes (total);
+    trackHarmony();
     silentFor = 0.0f;
 
     // Key evidence from the tracked notes: chord tones without their overtones, the bass
@@ -189,6 +191,88 @@ void KeyDetector::bestKey (int& root, bool& isMinor, float& score) const
             const float s = keyScore (k, mi);
             if (s > score) { score = s; root = k; isMinor = mi; }
         }
+}
+
+void KeyDetector::trackHarmony()
+{
+    if (numNotes <= 0) return;
+    const float dt = (float) hop / (float) sr;
+    const float aPc = 1.0f - std::exp (-dt / 0.3f), aBass = 1.0f - std::exp (-dt / 0.1f);
+    int frameMask = 0;
+    for (int k = 0; k < numNotes; ++k) frameMask |= 1 << (notes[(size_t) k] % 12);
+    const int frameBass = notes[0] % 12;
+    for (int i = 0; i < 12; ++i)
+    {
+        pcEvidence[(size_t) i] += ((((frameMask >> i) & 1) ? 1.0f : 0.0f) - pcEvidence[(size_t) i]) * aPc;
+        bassEvidence[(size_t) i] += ((i == frameBass ? 1.0f : 0.0f) - bassEvidence[(size_t) i]) * aBass;
+    }
+    int bass = 0;
+    for (int i = 1; i < 12; ++i) if (bassEvidence[(size_t) i] > bassEvidence[(size_t) bass]) bass = i;
+
+    // what is clearly sounding now
+    int now = 0;
+    for (int i = 0; i < 12; ++i) if (pcEvidence[(size_t) i] > 0.55f) now |= 1 << i;
+    auto count = [] (int m) { int c = 0; for (int i = 0; i < 12; ++i) c += (m >> i) & 1; return c; };
+
+    auto clashes = [] (int mask, int pc)   // a semitone from a note of `mask`
+    {
+        return ((mask >> ((pc + 1) % 12)) & 1) || ((mask >> ((pc + 11) % 12)) & 1);
+    };
+
+    auto newChord = [&]
+    {
+        // the bass first, then the other notes by how clearly they sound; a note a semitone
+        // from a stronger one is left out (usually a melody note passing over the chord)
+        std::array<int, 12> order {};
+        for (int i = 0; i < 12; ++i) order[(size_t) i] = i;
+        std::sort (order.begin(), order.end(), [this] (int a, int b) { return pcEvidence[(size_t) a] > pcEvidence[(size_t) b]; });
+        chordMask = 1 << bass;
+        // first what sounds in this very frame, then what is still clearly ringing (which may be
+        // left over from the previous chord, so it never pushes a current note out)
+        for (int pass = 0; pass < 2; ++pass)
+        {
+            const int pool = pass == 0 ? frameMask : (now & ~frameMask);
+            for (int pc : order)
+                if (((pool >> pc) & 1) && ! ((chordMask >> pc) & 1) && ! clashes (chordMask, pc)) chordMask |= 1 << pc;
+        }
+        chordBass = bass;
+        // voicing from the notes heard right now: one note per pitch class
+        numChord = 0;
+        for (int k = 0; k < numNotes && numChord < maxNotes; ++k)
+        {
+            const int pc = notes[(size_t) k] % 12;
+            bool dup = false;
+            for (int j = 0; j < numChord; ++j) dup |= chordNotes[(size_t) j] % 12 == pc;
+            if (! dup && ((chordMask >> pc) & 1)) chordNotes[(size_t) numChord++] = notes[(size_t) k];
+        }
+        std::sort (chordNotes.begin(), chordNotes.begin() + numChord);
+        ++chordVer;
+        changeHeld = 0.0f;
+    };
+
+    if (numChord == 0) { newChord(); return; }   // the first chord: right away
+
+    // a real chord change: a new bass, or most of what sounds is not in the chord - held ~0.15 s
+    const bool newBass = bass != chordBass && bassEvidence[(size_t) bass] > 0.7f;
+    const int shared = count (now & chordMask);
+    const bool moved = count (now) >= 2 && shared * 2 < count (now);
+    if (newBass || moved)
+    {
+        changeHeld += dt;
+        if (changeHeld >= (newBass ? 0.04f : 0.15f)) newChord();   // a new bass is already confirmed
+        return;
+    }
+    changeHeld = 0.0f;
+
+    // a note held long enough joins the chord (e.g. a sustained added tone)
+    for (int k = 0; k < numNotes && numChord < maxNotes; ++k)
+    {
+        const int pc = notes[(size_t) k] % 12;
+        if (((chordMask >> pc) & 1) || pcEvidence[(size_t) pc] < 0.95f || clashes (chordMask, pc)) continue;
+        chordMask |= 1 << pc;
+        chordNotes[(size_t) numChord++] = notes[(size_t) k];
+        std::sort (chordNotes.begin(), chordNotes.begin() + numChord);
+    }
 }
 
 void KeyDetector::trackNotes (float total)
@@ -330,6 +414,7 @@ void KeyDetector::updateSong (float total, const std::array<float, 12>& frame)
     }
     const bool rising = playing && sum > 0.0f && flux > 0.2f * sum && level > prevFrameEnergy * 1.05f;
     const bool onset = rising && ! prevOnset;
+    if (onset) ++onsets;
     prevOnset = rising;
     prevFrameEnergy = level;
     smooth (onsetRate, onset ? 1.0f / dt : 0.0f, 6.0f);

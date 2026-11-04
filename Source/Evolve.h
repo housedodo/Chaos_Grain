@@ -34,6 +34,8 @@ public:
         std::array<float, 12> favourites {};
         std::array<int, KeyDetector::maxNotes> chord {};   // notes being played now (MIDI, sorted)
         int numChord = 0;
+        std::array<int, KeyDetector::maxNotes> notes {};   // raw tracked notes (incl. melody)
+        int numNotes = 0, onsets = 0;                       // onsets: the song brain's note-start counter
         int section = 0;                                    // song brain's section counter
         std::array<float, 12> colour {};                    // the last few seconds' notes (section fingerprint)
     };
@@ -99,6 +101,8 @@ private:
     std::array<Slot, maxSlots> slots {};
     int curSlot = -1, lastSection = 0, slotAge = 0;
     float sectionTimer = -1.0f, growTarget = -1.0f, glideTime = 0.0f;
+    int lastOnsets = 0;
+    bool onsetPending = false;
     std::array<float, 16> growHistory {};   // growth every 0.5 s (section changes are noticed late)
     int growHistPos = 0;
     float growHistTimer = 0.0f;

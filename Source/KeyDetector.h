@@ -28,6 +28,15 @@ public:
     static constexpr int maxNotes = 6;
     int getNotes (int* out) const { for (int i = 0; i < numNotes; ++i) out[i] = notes[(size_t) i]; return numNotes; }
 
+    // Harmony: the chord being played, held steady. It only changes on a real chord change
+    // (a new bass note, or most of the notes changing) - not for melody notes or a bass note
+    // jumping an octave. Notes that are held long enough (~0.7 s) join the chord.
+    // `version` increments on every chord change.
+    int getChord (int* out) const { for (int i = 0; i < numChord; ++i) out[i] = chordNotes[(size_t) i]; return numChord; }
+    int chordVersion() const { return chordVer; }
+    int chordPitchClasses() const { return chordMask; }    // bit per pitch class
+    int onsetCount() const { return onsets; }              // note starts so far (also legato)
+
     // For tests: analyse a mono buffer offline and return (root, minor).
     static std::pair<int, bool> estimate (const float* chroma12);
 
@@ -58,6 +67,7 @@ public:
 private:
     void analyse();
     void trackNotes (float total);
+    void trackHarmony();
     void updateSong (float total, const std::array<float, 12>& frame);
 
     static constexpr int order = 13, size = 1 << order, hop = size / 4; // fine bass resolution (5.9 Hz bins at 48 kHz), ~43 ms updates
@@ -91,6 +101,9 @@ private:
     float keyScore (int root, bool isMinor) const;
     float shortBright = 0.5f, longBright = 0.5f, shortEnergy = 0.0f, longEnergy = 0.0f;
 
-    std::array<int, maxNotes> notes {}, candidate {};
+    std::array<int, maxNotes> notes {}, candidate {}, chordNotes {};
+    std::array<float, 12> pcEvidence {}, bassEvidence {};
+    int numChord = 0, chordVer = 0, chordMask = 0, chordBass = -1, onsets = 0;
+    float changeHeld = 0.0f;
     int numNotes = 0, numCandidate = 0, candidateFrames = 0;
 };

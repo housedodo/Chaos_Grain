@@ -448,7 +448,7 @@ void ChaosGrainProcessor::processFx (juce::AudioBuffer<float>& buffer, const Tra
     {
         // Resonators follow the notes you play
         int notes[KeyDetector::maxNotes];
-        const int numNotes = keyDetector.getNotes (notes);
+        const int numNotes = keyDetector.getChord (notes);   // the held chord, not every melody note
         if (! freeze) resonator.setNotes (notes, numNotes);
         Resonator::Params rp;
         rp.shape = shape; rp.chaos = chaos; rp.freeze = freeze; rp.lock = lock; rp.stepBeats = stepBeats;
@@ -462,6 +462,7 @@ void ChaosGrainProcessor::processFx (juce::AudioBuffer<float>& buffer, const Tra
         Spectral::Params sp;
         sp.shape = shape; sp.chaos = chaos; sp.freeze = freeze; sp.lock = lock; sp.stepBeats = stepBeats;
         sp.keyRoot = root; sp.minor = minor; sp.keyValid = keyValid;
+        sp.chordMask = keyDetector.chordPitchClasses();
         steerInto (sp);
         spectral.process (dl, dr, wl, wr, n, sp, transport);
         space = 0.3f;
@@ -473,11 +474,13 @@ void ChaosGrainProcessor::processFx (juce::AudioBuffer<float>& buffer, const Tra
         ep.keyRoot = root; ep.minor = minor; ep.keyValid = keyValid;
         ep.song = steer;
         ep.favourites = keyDetector.favouritePitchClasses();
-        ep.numChord = keyDetector.getNotes (ep.chord.data());
+        ep.numChord = keyDetector.getChord (ep.chord.data());
+        ep.numNotes = keyDetector.getNotes (ep.notes.data());
+        ep.onsets = keyDetector.onsetCount();
         ep.section = keyDetector.song().section;
         ep.colour = keyDetector.recentPitchClasses();
         evolve.process (dl, dr, wl, wr, n, ep, transport);
-        space = 0.2f + 0.65f * evolve.growth(); // the room widens as it grows
+        space = 0.45f + 0.5f * evolve.growth(); // a clear space from the start, widening as it grows
     }
 
     // Level match: keep the processed sound near the input's loudness, so every engine
@@ -513,8 +516,8 @@ void ChaosGrainProcessor::processFx (juce::AudioBuffer<float>& buffer, const Tra
     rv.roomSize = 0.55f + 0.44f * space;
     rv.damping = 0.35f;
     rv.width = 1.0f;
-    rv.wetLevel = 0.22f * space;
-    rv.dryLevel = 0.5f * (1.0f - 0.4f * space);
+    rv.wetLevel = (eng == 2 ? 0.4f : 0.22f) * space;          // EVOLVE: a clear, lush space from the start
+    rv.dryLevel = 0.5f * (1.0f - (eng == 2 ? 0.6f : 0.4f) * space);
     reverb.setParameters (rv);
     if (numCh > 1) reverb.processStereo (wl, wr, n);
     else           reverb.processMono (wl, n);

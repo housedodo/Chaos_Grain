@@ -65,7 +65,8 @@ void Spectral::process (const float* inL, const float* inR, float* outL, float* 
                 if (! p.lock) seed = (juce::int64) ((juce::uint64) p.songSeed * 6364136223846793005ULL + (juce::uint64) (((beat / 16) % 4 + 4) % 4) * 1442695040888963407ULL + (juce::uint64) userSeed);
                 patternRng.setSeed (seed);
             }
-            for (auto& o : bandOffset) o = patternRng.nextFloat();
+            if (((beat % 4) + 4) % 4 == 0)            // a new rainbow pattern every bar
+                for (auto& o : bandOffset) o = patternRng.nextFloat();
         }
     }
 
@@ -140,15 +141,25 @@ void Spectral::processFrame (Channel& c, int chIndex, const Params& p)
             if (dist < best) { best = dist; degree = d; }
         }
         float w = (1.0f - sTune) + sTune * 1.8f * std::exp (-(best / width) * (best / width));
+        // the held chord's notes ring most: the tuning follows the harmony, not every melody note
+        if (p.chordMask != 0)
+        {
+            const int pcNear = (((int) std::lround (midi) % 12) + 12) % 12;
+            w *= ((p.chordMask >> pcNear) & 1) ? 1.0f + 0.5f * sTune : 1.0f - 0.35f * sTune;
+        }
         // CHAOS: the emphasis drifts slowly across the scale degrees
         if (chaos > 0.0f)
-            w *= juce::jmax (0.25f, 1.0f + chaos * 0.7f * std::sin (twoPi * (float) (barPos / 4.0 + motionOffset)
+            w *= juce::jmax (0.25f, 1.0f + chaos * 0.5f * std::sin (twoPi * (float) (barPos / 8.0 + motionOffset)
                                                                   + (float) degree * (twoPi / (float) scaleSize) * 1.7f));
         return w;
     };
 
     // --- Base layer: tuned, with a short resonant ring (clean attacks, smooth tails) ---
-    const float decay = 0.7f + 0.25f * sTune;
+    // ring time of the tuned partials: a smooth, sustained texture instead of flickering
+    // with every note (up to ~0.6 s)
+    const float ringSec = 0.06f + 0.55f * sTune;
+    const float decay = std::exp (-((float) hop / (float) sr) / ringSec);
+    const float attack = 1.0f - std::exp (-((float) hop / (float) sr) / (0.005f + 0.15f * sTune));
     re.fill (0.0f); im.fill (0.0f);
     for (int k = 1; k < bins - 1; ++k)
     {
@@ -157,7 +168,8 @@ void Spectral::processFrame (Channel& c, int chIndex, const Params& p)
             const float m = mag[(size_t) k] * weightAt (freq[(size_t) k] * hzPerRad);
             if (m >= c.hold[(size_t) k] * decay)
             {
-                c.hold[(size_t) k] = m;
+                // partials swell in (up to ~0.15 s) instead of jumping: a smooth texture
+                c.hold[(size_t) k] += (m - c.hold[(size_t) k]) * attack;
                 c.holdFreq[(size_t) k] = freq[(size_t) k];
                 c.acc[(size_t) k] = phase[(size_t) k];
             }

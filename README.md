@@ -75,6 +75,11 @@ few seconds clearly differ from the last ~12 s). The screen shows `CALM`, `BUILD
 - **LOCK** keeps the current pattern; **double-click** the screen for a new variation (in EVOLVE
   this also resets its growth and memory).
 
+- **Harmony tracking**: the engines follow the *chord* you play, not every melody note. The
+  chord only changes on a real chord change (a new bass note, or most notes changing); a melody
+  on top, or a bass note jumping an octave, does not retune anything. Notes held for ~1 s join the
+  chord unless they are a semitone from a chord tone. RESONATE rings the chord, SPECTRAL
+  emphasises its notes, EVOLVE's drone follows it.
 - **Auto key**: ChaosGrain FX listens to what you play and works out the key from the notes it
   tracks (overtones removed), the bass line and the chord on each 4-bar downbeat; it follows key
   changes within about 10 s. It shows the key on the screen (e.g. `KEY A MIN`) and which notes you are playing (RESONATE shows them on its strings; EVOLVE shows

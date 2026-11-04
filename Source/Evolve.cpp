@@ -376,6 +376,8 @@ void Evolve::process (const float* inL, const float* inR, float* outL, float* ou
         }
     }
 
+    if (p.onsets != lastOnsets) { lastOnsets = p.onsets; onsetPending = true; }
+
     // smart drone: re-evaluated when a new chord has settled (~0.25 s)
     {
         int mask = 0;
@@ -384,10 +386,10 @@ void Evolve::process (const float* inL, const float* inR, float* outL, float* ou
         else chordStable += dt;
         if (mask != 0 && chordStable > 0.25f && mask != droneMask && ! p.freeze) { droneMask = mask; updateDrone (p); }
     }
-    const float r1 = smoothstep (0.12f, 0.3f, grow);   // resonance
-    const float r2 = smoothstep (0.3f, 0.5f, grow);    // echoes
-    const float r3 = smoothstep (0.5f, 0.7f, grow);    // drone
-    const float r4 = smoothstep (0.7f, 0.92f, grow);   // shimmer
+    const float r1 = smoothstep (0.03f, 0.18f, grow);  // resonance
+    const float r2 = smoothstep (0.18f, 0.38f, grow);  // echoes
+    const float r3 = smoothstep (0.38f, 0.6f, grow);   // drone
+    const float r4 = smoothstep (0.6f, 0.85f, grow);   // shimmer
 
     // --- how you play weights the stages (more with CHAOS) ---
     const float react = 0.3f + 0.7f * chaos;
@@ -434,7 +436,7 @@ void Evolve::process (const float* inL, const float* inR, float* outL, float* ou
     const float echoAmt = r2 * echoWt * 0.6f;
     const float shimFb = juce::jmin (0.45f, 0.3f * r4 * shimW);
     const float shimLen = 0.08f * (float) sr;
-    const float directG = 0.75f - 0.35f * grow;
+    const float directG = 0.45f - 0.25f * grow;   // your sound is in MIX already: the wet side is the effect
     const float freezeA = timeCoef (0.03f, sr);
     const int loopLen = (int) (2.0 * sr), loopX = (int) (0.25 * sr);
     const auto memLen = (long long) mem.size();
@@ -468,10 +470,16 @@ void Evolve::process (const float* inL, const float* inR, float* outL, float* ou
         onsetCool -= 1.0f / (float) sr;
         if (! p.freeze)
         {
-            if (env > 1.8f * envSlow && env > 0.3f * peak && onsetCool <= 0.0f)
+            if (onsetCool <= 0.0f && ((env > 1.8f * envSlow && env > 0.3f * peak) || (onsetPending && env > 0.15f * peak)))
             {
                 onsetCool = 0.4f;
-                Mark mk { memCount, env / peak, p.numChord > 0 ? p.chord[(size_t) (p.numChord - 1)] % 12 : -1, p.numChord > 0 && p.numChord <= 2 };
+                onsetPending = false;
+                // a melody moment: few notes, or the top note is not part of the held chord
+                const int top = p.numNotes > 0 ? p.notes[(size_t) (p.numNotes - 1)] % 12 : -1;
+                int cm = 0;
+                for (int k = 0; k < p.numChord; ++k) cm |= 1 << (p.chord[(size_t) k] % 12);
+                const bool melody = top >= 0 && (p.numNotes <= 2 || ! ((cm >> top) & 1));
+                Mark mk { memCount, env / peak, top, melody };
                 if (numMarks < maxMarks) marks[(size_t) numMarks++] = mk;
                 else
                 {

@@ -31,6 +31,7 @@ public:
         // song brain (smoothed, changes land on bar lines); CHAOS sets how much it steers
         float energy = 0.5f, density = 0.3f, brightness = 0.5f, sustain = 0.5f, reg = 0.5f;
         juce::uint32 songSeed = 1;
+        int chordMask = 0;   // pitch classes of the held chord (from the harmony tracker)
     };
 
     void prepare (double sampleRate);
