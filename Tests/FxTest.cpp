@@ -176,6 +176,48 @@ int main (int argc, char** argv)
         }
     }
 
+    // 2b. Auto key from chord progressions (electric-piano-like chords with a bass note)
+    {
+        auto prog = [] (const std::vector<std::vector<int>>& chords, double each, double total)
+        {
+            juce::AudioBuffer<float> b (1, (int) (sr * total));
+            b.clear();
+            int k = 0;
+            for (double t0 = 0.0; t0 + 0.2 < total; t0 += each, ++k)
+                for (int m : chords[(size_t) k % chords.size()])
+                {
+                    const float f = 440.0f * std::pow (2.0f, (float) (m - 69) / 12.0f);
+                    for (int i = 0; i < (int) ((each - 0.05) * sr) && (int) (t0 * sr) + i < b.getNumSamples(); ++i)
+                    {
+                        const float tt = (float) i / (float) sr;
+                        const float idx = 1.6f * std::exp (-tt / 0.12f) + 0.25f;
+                        b.addSample (0, (int) (t0 * sr) + i, 0.08f * std::sin (twoPi * f * tt + idx * std::sin (twoPi * f * tt)) * std::exp (-tt / 1.5f));
+                    }
+                }
+            return b;
+        };
+        struct P { std::vector<std::vector<int>> chords; int root; bool minor; const char* name; };
+        const P progs[] = {
+            { { { 45, 55, 60, 64 }, { 41, 52, 57, 60 }, { 48, 55, 59, 64 }, { 43, 52, 55, 59 } }, 9, true,  "Am7-Fmaj7-Cmaj7-G6 -> A min" },
+            { { { 48, 55, 60, 64 }, { 43, 55, 59, 62 }, { 45, 57, 60, 64 }, { 41, 57, 60, 65 } }, 0, false, "C-G-Am-F -> C maj" },
+            { { { 40, 55, 59, 64 }, { 48, 55, 60, 64 }, { 43, 55, 59, 62 }, { 50, 57, 62, 66 } }, 4, true,  "Em-C-G-D -> E min" },
+            { { { 50, 57, 60, 65 }, { 43, 53, 59, 62 }, { 48, 55, 59, 64 }, { 48, 55, 59, 64 } }, 0, false, "Dm7-G7-Cmaj7 -> C maj" },
+            { { { 42, 57, 61, 66 }, { 50, 57, 62, 66 }, { 45, 57, 61, 64 }, { 40, 56, 59, 64 } }, 6, true,  "F#m-D-A-E -> F# min" },
+            { { { 46, 58, 62, 65 }, { 43, 58, 62, 67 }, { 39, 58, 63, 67 }, { 41, 57, 60, 65 } }, 10, false, "Bb-Gm-Eb-F -> Bb maj" },
+            { { { 45, 57, 60, 64 }, { 43, 55, 59, 62 }, { 41, 57, 60, 65 }, { 40, 56, 59, 64 } }, 9, true,  "Am-G-F-E -> A min" },
+        };
+        static const char* pcName[12] = { "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B" };
+        for (auto& pr : progs)
+        {
+            Rig r (prog (pr.chords, 2.0, 16.0));
+            r.run (16.0);
+            const auto& kd = r.proc->keyDetector;
+            const bool ok = kd.isValid() && kd.root() == pr.root && kd.isMinor() == pr.minor;
+            std::printf ("   (%s: heard %s %s)\n", pr.name, pcName[kd.root()], kd.isMinor() ? "min" : "maj");
+            check (ok, juce::String ("auto key: ") + pr.name, (float) kd.root());
+        }
+    }
+
     // 3. Every engine sounds, stays finite and bounded (default + extreme settings)
     for (int e = 0; e < engines.size(); ++e)
         for (int extreme = 0; extreme < 2; ++extreme)
@@ -269,7 +311,14 @@ int main (int argc, char** argv)
         prog.addFrom (0, (int) (2.0 * sr), f2, 0, 0, f2.getNumSamples());
         Rig r (prog);
         r.set ("engine", 0.0f); r.set ("mix", 1.0f); r.set ("chaos", 0.0f); r.set ("shape", 0.8f);
-        auto out = r.run (3.9);
+        juce::AudioBuffer<float> out (2, 0);
+        for (int k = 0; k < 39; ++k)
+        {
+            auto part = r.run (0.1);
+            const int at = out.getNumSamples();
+            out.setSize (2, at + part.getNumSamples(), true);
+            for (int ch = 0; ch < 2; ++ch) out.copyFrom (ch, at, part, ch, 0, part.getNumSamples());
+        }
         auto share = [&] (double a0, double a1, std::vector<int> pcs)
         {
             juce::AudioBuffer<float> seg (2, (int) ((a1 - a0) * sr));

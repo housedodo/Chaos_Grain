@@ -30,6 +30,9 @@ void KeyDetector::prepare (double sampleRate)
         window[(size_t) i] = 0.5f - 0.5f * std::cos (juce::MathConstants<float>::twoPi * (float) i / (float) size);
     // ~8 s memory: frames arrive every `hop` samples
     decay = std::exp (-(float) hop / (float) (8.0 * sr));
+    noteDecay = std::exp (-(float) hop / (float) (12.0 * sr));
+    bassDecay = std::exp (-(float) hop / (float) (16.0 * sr));
+    homeDecay = std::exp (-(float) hop / (float) (45.0 * sr));
     reset();
 }
 
@@ -49,6 +52,8 @@ void KeyDetector::reset()
     rmsPeak = 1.0e-4f; sustainAcc = 0.5f; sectionCooldown = 0.0f;
     shortChroma.fill (0.0f); longChroma.fill (0.0f); sectionChroma.fill (0.0f);
     prevMag.fill (0.0f); prevOnset = false; noteUse.fill (0.0f);
+    noteChroma.fill (0.0f); bassHist.fill (0.0f); homeHist.fill (0.0f);
+    silentFor = 100.0f; notesFresh = false; phraseStart = true;
     shortBright = longBright = 0.5f; shortEnergy = longEnergy = 0.0f;
     uiRoot.store (-1);
 }
@@ -96,14 +101,33 @@ void KeyDetector::analyse()
         total += m * m;
     }
 
-    if (total < 1.0e-3f) // silence: keep the current key and notes
+    if (total < 4.0e-3f) // silence: keep the current key and notes
     {
         framePc = -1;
+        silentFor += (float) hop / (float) sr;
+        if (silentFor > 0.8f) phraseStart = true;
         std::array<float, 12> none {};
         updateSong (0.0f, none);
         return;
     }
     trackNotes (total);
+    silentFor = 0.0f;
+
+    // Key evidence from the tracked notes: chord tones without their overtones, the bass
+    // note (lowest tracked note), and the chord that starts a phrase after a pause ("home").
+    for (auto& v : noteChroma) v *= noteDecay;
+    for (auto& v : bassHist) v *= bassDecay;
+    for (auto& v : homeHist) v *= homeDecay;
+    if (numNotes > 0)
+    {
+        for (int k = 0; k < numNotes; ++k) noteChroma[(size_t) (notes[(size_t) k] % 12)] += 1.0f;
+        bassHist[(size_t) (notes[0] % 12)] += 1.0f;
+        if (phraseStart && notesFresh)
+        {
+            homeHist[(size_t) (notes[0] % 12)] += 1.0f;
+            phraseStart = false;
+        }
+    }
     {
         std::array<float, 12> fr = frame;
         for (auto& v : fr) v /= total;
@@ -125,9 +149,9 @@ void KeyDetector::analyse()
     if (mass < 0.02f) return; // need a few notes first
 
     // Best key, with a little hysteresis so it doesn't flicker
-    const auto [root, isMinor] = estimate (chroma.data());
-    const float score = correlate (chroma.data(), isMinor ? minorProfile : majorProfile, root);
-    const float current = valid ? correlate (chroma.data(), minor ? minorProfile : majorProfile, keyRoot) : -2.0f;
+    int root = 0; bool isMinor = false; float score = -2.0f;
+    bestKey (root, isMinor, score);
+    const float current = valid ? keyScore (keyRoot, minor) : -2.0f;
     if (! valid || score > current + 0.04f)
     {
         keyRoot = root;
@@ -139,28 +163,76 @@ void KeyDetector::analyse()
     uiMinor.store (minor);
 }
 
+float KeyDetector::keyScore (int root, bool isMinor) const
+{
+    // Pitch evidence: mostly the tracked notes (overtones removed), some raw chroma
+    std::array<float, 12> c {};
+    float sn = 0.0f, sc = 0.0f, sb = 0.0f, sh = 0.0f;
+    for (int i = 0; i < 12; ++i) { sn += noteChroma[(size_t) i]; sc += chroma[(size_t) i]; sb += bassHist[(size_t) i]; sh += homeHist[(size_t) i]; }
+    for (int i = 0; i < 12; ++i)
+        c[(size_t) i] = (sn > 0.0f ? 0.8f * noteChroma[(size_t) i] / sn : 0.0f) + (sc > 0.0f ? (sn > 0.0f ? 0.2f : 1.0f) * chroma[(size_t) i] / sc : 0.0f);
+    float s = correlate (c.data(), isMinor ? minorProfile : majorProfile, root);
+    // The tonic tends to be in the bass and to start phrases. This decides between keys that
+    // share their notes (C major / A minor, E minor / G major ...).
+    if (sb > 0.0f) s += 0.3f * bassHist[(size_t) root] / sb;
+    if (sh > 0.0f) s += 0.3f * homeHist[(size_t) root] / sh;
+    return s;
+}
+
+void KeyDetector::bestKey (int& root, bool& isMinor, float& score) const
+{
+    score = -10.0f;
+    for (int k = 0; k < 12; ++k)
+        for (bool mi : { false, true })
+        {
+            const float s = keyScore (k, mi);
+            if (s > score) { score = s; root = k; isMinor = mi; }
+        }
+}
+
 void KeyDetector::trackNotes (float total)
 {
+    notesFresh = false;
     juce::ignoreUnused (total);
-    // Iterative estimate-and-cancel over MIDI 36..96: a note's salience is the weighted
-    // energy at its first 8 harmonics (looked up within +/-40 cents). The strongest note is
-    // taken, its harmonics are removed from the spectrum, and the search repeats.
-    constexpr int lo = 36, hi = 96, half = size / 2;
-    std::array<float, size / 2 + 1> spec {};
-    std::copy (data.begin(), data.begin() + half + 1, spec.begin());
-
+    // Iterative estimate-and-cancel over MIDI 33..96. First the spectrum's peaks are found,
+    // with their exact frequency (parabolic interpolation between FFT bins - the bins alone
+    // are wider than a semitone in the bass). A note's salience is the weighted level of the
+    // peaks at its first 8 harmonics (within 35 cents). The strongest note is taken, its
+    // harmonics' peaks are removed, and the search repeats.
+    constexpr int lo = 33, hi = 96, half = size / 2;
     const float binHz = (float) sr / (float) size;
-    auto range = [binHz] (float f)
+
+    struct Peak { float hz, mag; };
+    std::array<Peak, 80> peaks {};
+    int numPeaks = 0;
     {
-        const int a = (int) std::floor (f * 0.977f / binHz), b = (int) std::ceil (f * 1.023f / binHz);
-        const int c = (int) std::lround (f / binHz);
-        return std::pair<int, int> { juce::jmin (a, c), juce::jmax (b, c) };
-    };
+        float maxMag = 0.0f;
+        for (int k = 2; k < half - 1; ++k) maxMag = juce::jmax (maxMag, data[(size_t) k]);
+        const float floorMag = maxMag * 0.01f;
+        const int kHi = juce::jmin (half - 2, (int) (6500.0f / binHz));
+        for (int k = 2; k <= kHi; ++k)
+        {
+            const float m = data[(size_t) k];
+            if (m < floorMag || m <= data[(size_t) (k - 1)] || m < data[(size_t) (k + 1)]) continue;
+            const float al = std::log (data[(size_t) (k - 1)] + 1.0e-9f), be = std::log (m + 1.0e-9f), ga = std::log (data[(size_t) (k + 1)] + 1.0e-9f);
+            const float den = al - 2.0f * be + ga;
+            const float off = den < 0.0f ? juce::jlimit (-0.5f, 0.5f, 0.5f * (al - ga) / den) : 0.0f;
+            const Peak pk { ((float) k + off) * binHz, std::exp (be - 0.25f * (al - ga) * off) };
+            if (numPeaks < (int) peaks.size()) peaks[(size_t) numPeaks++] = pk;
+            else
+            {
+                int weakest = 0;
+                for (int j = 1; j < numPeaks; ++j) if (peaks[(size_t) j].mag < peaks[(size_t) weakest].mag) weakest = j;
+                if (pk.mag > peaks[(size_t) weakest].mag) peaks[(size_t) weakest] = pk;
+            }
+        }
+    }
+    const float tol = std::pow (2.0f, 35.0f / 1200.0f);
     auto magAt = [&] (float f)
     {
-        auto [a, b] = range (f);
         float m = 0.0f;
-        for (int k = juce::jmax (1, a); k <= juce::jmin (half - 1, b); ++k) m = juce::jmax (m, spec[(size_t) k]);
+        for (int j = 0; j < numPeaks; ++j)
+            if (peaks[(size_t) j].hz > f / tol && peaks[(size_t) j].hz < f * tol) m = juce::jmax (m, peaks[(size_t) j].mag);
         return m;
     };
     auto salience = [&] (int m)
@@ -212,10 +284,8 @@ void KeyDetector::trackNotes (float total)
         // cancel this note's harmonics
         const float f0 = 440.0f * std::pow (2.0f, (float) (arg - 69) / 12.0f);
         for (int h = 1; h <= 8; ++h)
-        {
-            auto [a, b] = range (f0 * (float) h);
-            for (int k = juce::jmax (1, a); k <= juce::jmin (half - 1, b); ++k) spec[(size_t) k] = 0.0f;
-        }
+            for (int j = 0; j < numPeaks; ++j)
+                if (peaks[(size_t) j].hz > f0 * (float) h / tol && peaks[(size_t) j].hz < f0 * (float) h * tol) peaks[(size_t) j].mag = 0.0f;
     }
     if (count == 0) return;
     std::sort (found.begin(), found.begin() + count);
@@ -226,6 +296,7 @@ void KeyDetector::trackNotes (float total)
     candidateFrames = same ? candidateFrames + 1 : 0;
     if (candidateFrames >= 1)
     {
+        notesFresh = ! (numNotes == count && std::equal (found.begin(), found.begin() + count, notes.begin())) || phraseStart;
         notes = found;
         numNotes = count;
     }

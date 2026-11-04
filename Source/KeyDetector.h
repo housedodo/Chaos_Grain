@@ -55,7 +55,7 @@ private:
     void trackNotes (float total);
     void updateSong (float total, const std::array<float, 12>& frame);
 
-    static constexpr int order = 12, size = 1 << order, hop = size / 2;
+    static constexpr int order = 13, size = 1 << order, hop = size / 4; // fine bass resolution (5.9 Hz bins at 48 kHz), ~43 ms updates
     juce::dsp::FFT fft { order };
     std::array<float, size> fifo {};
     std::array<float, size * 2> data {};
@@ -77,6 +77,12 @@ private:
     std::array<float, size / 2> prevMag {};
     bool prevOnset = false;
     std::array<float, 12> noteUse {};
+    // key evidence from the tracked notes (no overtones), the bass line and phrase starts
+    std::array<float, 12> noteChroma {}, bassHist {}, homeHist {};
+    float silentFor = 100.0f, noteDecay = 0.99f, bassDecay = 0.99f, homeDecay = 0.99f;
+    bool notesFresh = false, phraseStart = true;
+    void bestKey (int& root, bool& isMinor, float& score) const;
+    float keyScore (int root, bool isMinor) const;
     float shortBright = 0.5f, longBright = 0.5f, shortEnergy = 0.0f, longEnergy = 0.0f;
 
     std::array<int, maxNotes> notes {}, candidate {};
