@@ -5,6 +5,7 @@
 #include "GrainEngine.h"
 #include "Resonator.h"
 #include "Spectral.h"
+#include "Evolve.h"
 #include "KeyDetector.h"
 
 // Two plugins are built from this code: the instrument (sampler, MIDI) and the
@@ -58,9 +59,10 @@ public:
     // FX build: the three engines + key tracking
     Resonator resonator;
     Spectral spectral;
+    Evolve evolve;
     KeyDetector keyDetector;
     void newVariation();
-    static juce::StringArray engineNames() { return { "Resonate", "Spectral" }; }
+    static juce::StringArray engineNames() { return { "Resonate", "Spectral", "Evolve" }; }
 
     static juce::StringArray rateNames() { return { "1/1", "1/2", "1/4", "1/8", "1/16", "1/32", "1/8T", "1/16T" }; }
     static juce::StringArray modeNames() { return { "Arp", "Cascade", "Harmony", "Kaleido", "Shuffle", "Bend", "Cloud", "Stutter", "Grain" }; }
@@ -73,6 +75,11 @@ private:
     static juce::AudioProcessorValueTreeState::ParameterLayout createFxLayout();
     void processFx (juce::AudioBuffer<float>& buffer, const TransportInfo& transport);
     int lastEngine = -1, lastNotePc = -1;
+    // song steering: the song brain's picture, taken on bar lines and smoothed over ~2 bars
+    KeyDetector::SongState steer, steerTarget;
+    double steerBarPos = 0.0;
+    juce::int64 steerBar = -1;
+    void updateSteer (const TransportInfo& transport, int numSamples);
     float dryLevel = 0.0f, wetLevel = 0.0f, levelMatch = 1.0f, lastLevelMatch = 1.0f;
     static juce::AudioProcessorValueTreeState::ParameterLayout createLayout();
     void timerCallback() override; // frees old samples on the message thread

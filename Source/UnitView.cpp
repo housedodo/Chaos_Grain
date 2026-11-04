@@ -234,7 +234,7 @@ namespace
     const juce::Rectangle<int> lockRect   { kIsFx ? 68 : 66, 94, 12, 8 };
     const juce::Rectangle<int> followRect { 96, 94, 12, 8 };
     // FX: engine buttons under the screen
-    const juce::Rectangle<int> engineRects[2] = { { 32, 94, 12, 8 }, { 84, 94, 12, 8 } };
+    const juce::Rectangle<int> engineRects[3] = { { 19, 94, 12, 8 }, { 58, 94, 12, 8 }, { 97, 94, 12, 8 } };
 
     // Small push-button: grey cap, lit when on.
     void drawMiniButton (Canvas& c, juce::Rectangle<int> r, bool on, juce::Colour litColour)
@@ -616,7 +616,7 @@ void UnitView::mouseDown (const juce::MouseEvent& e)
             q->setValueNotifyingHost (q->getValue() > 0.5f ? 0.0f : 1.0f);
         };
         if (powerRect.expanded (1).contains (p)) { toggle ("freeze"); return; }
-        for (int i = 0; i < 2; ++i)
+        for (int i = 0; i < 3; ++i)
             if (engineRects[i].expanded (3).contains (p))
             {
                 auto* eng = proc.apvts.getParameter ("engine");
@@ -728,13 +728,14 @@ void UnitView::renderFx (juce::Image& img)
     const double nowMs = juce::Time::getMillisecondCounterHiRes();
     const float t = (float) (nowMs * 0.001);
     const bool frozen = proc.apvts.getRawParameterValue ("freeze")->load() > 0.5f;
-    const int eng = juce::jlimit (0, 1, (int) proc.apvts.getRawParameterValue ("engine")->load());
+    const int eng = juce::jlimit (0, 2, (int) proc.apvts.getRawParameterValue ("engine")->load());
     const float shape = proc.apvts.getRawParameterValue ("shape")->load();
 
     // Activity (for the LED)
     float activity = 0.0f;
     if (eng == 0) for (auto& l : proc.resonator.uiLevel) activity = std::max (activity, l.load (std::memory_order_relaxed));
-    else for (auto& b : proc.spectral.uiBands) activity = std::max (activity, b.load (std::memory_order_relaxed) * 50.0f);
+    else if (eng == 1) for (auto& b : proc.spectral.uiBands) activity = std::max (activity, b.load (std::memory_order_relaxed) * 50.0f);
+    else activity = proc.keyDetector.uiEnergy.load() + proc.evolve.uiRecall.load();
 
     // --- Casing ---
     c.bevel (0, 0, (float) lowW, (float) lowH, col::casing, 5, true, 2);
@@ -788,6 +789,61 @@ void UnitView::renderFx (juce::Image& img)
             }
         }
     }
+    else if (eng == 2)
+    {
+        // A pixel plant that grows with your playing: one leaf per stage, a flower for SHIMMER
+        const float grow = proc.evolve.uiGrowth.load (std::memory_order_relaxed);
+        float st[5];
+        for (int k = 0; k < 5; ++k) st[k] = proc.evolve.uiStage[(size_t) k].load (std::memory_order_relaxed);
+        const int ground = scrY + scrH - 10, cx = scrX + scrW / 2 - 4;
+        for (int x = scrX + 3; x < scrX + scrW - 10; ++x) c.px (x, ground + 1, (x & 1) ? col::glow : col::scrB);
+
+        const int h = 3 + (int) std::lround (grow * 30.0f);
+        auto stemX = [&] (int y) { return cx + (int) std::lround (std::sin (t * 1.3f + (float) y * 0.18f) * (0.4f + grow) * (float) y / 30.0f); };
+        for (int y = 0; y <= h; ++y) c.px (stemX (y), ground - y, col::phos);
+        for (int k = 1; k <= 3; ++k) // leaves: RESONATE, ECHOES, DRONE
+        {
+            if (st[k] < 0.05f) continue;
+            const int y = (int) ((float) h * (0.25f + 0.22f * (float) (k - 1)));
+            const int len = 1 + (int) std::lround (st[k] * 5.0f);
+            const int dir = (k & 1) ? -1 : 1;
+            const int x0 = stemX (y);
+            for (int j = 1; j <= len; ++j)
+            {
+                c.px (x0 + dir * j, ground - y - j / 2, col::phos);
+                if (j < len) c.px (x0 + dir * j, ground - y - j / 2 + 1, col::glow);
+            }
+        }
+        if (st[4] > 0.05f) // SHIMMER: a flower, sparkling
+        {
+            const int fx = stemX (h), fy = ground - h - 1;
+            const int r = st[4] > 0.6f ? 2 : 1;
+            for (int dy = -r; dy <= r; ++dy)
+                for (int dx = -r; dx <= r; ++dx)
+                    if (std::abs (dx) + std::abs (dy) <= r) c.px (fx + dx, fy + dy, (dx == 0 && dy == 0) ? col::glow : col::seg);
+            for (int k = 0; k < 4; ++k)
+            {
+                const float a = t * 0.9f + (float) k * 1.7f;
+                if (std::fmod (t * 3.0f + (float) k * 0.37f, 1.0f) < st[4] * 0.6f)
+                    c.px (fx + (int) std::lround (std::cos (a) * 6.0f), fy + (int) std::lround (std::sin (a) * 4.0f), col::phos);
+            }
+        }
+        // Memories: seeds on the ground; they light up while it answers you
+        const int mems = proc.evolve.uiMemories.load();
+        const float rec = proc.evolve.uiRecall.load();
+        for (int k = 0; k < mems; ++k)
+            c.rect (scrX + 4 + k * 3, ground - 1, 2, 2, rec > 0.05f && std::fmod (t * 6.0f + (float) k, 2.0f) < 1.0f ? col::seg : col::glow);
+        // Growth meter with stage ticks
+        const int mx = scrX + scrW - 7, top = scrY + 14;
+        const int fill = (int) std::lround (grow * (float) (ground - top));
+        for (int y = top; y <= ground; ++y) c.px (mx, y, col::scrB);
+        for (int y = 0; y < fill; ++y) c.rect (mx - 1, ground - y, 3, 1, col::glow);
+        for (float th : { 0.12f, 0.3f, 0.5f, 0.7f }) c.px (mx + 2, ground - (int) std::lround (th * (float) (ground - top)), col::phos);
+        static const char* stageNames[5] = { "SPACE", "RESONATE", "ECHOES", "DRONE", "SHIMMER" };
+        int stage = 0;
+        for (int k = 1; k < 5; ++k) if (st[k] > 0.5f) stage = k;
+        c.small (stageNames[stage], (float) scrX + 3, scrY + 13, col::glow);
+    }
     else
     {
         // Live spectrum of the processed sound
@@ -823,9 +879,17 @@ void UnitView::renderFx (juce::Image& img)
             const juce::String pct = juce::String (juce::roundToInt (v * 100.0f)) + "%";
             if (id == "shape")
             {
-                const char* what = eng == 0 ? (v < 0.3f ? "ECHO" : v < 0.65f ? "SUSTAIN" : "SWELL")
-                                 : (v < 0.28f ? "TUNE" : v < 0.62f ? "UNISON" : "RAINBOW");
-                footer = juce::String (what) + " " + pct;
+                if (eng == 2)
+                {
+                    const int secs = juce::roundToInt (Evolve::growSeconds (v));
+                    footer = "GROW " + juce::String (secs / 60) + ":" + juce::String (secs % 60).paddedLeft ('0', 2);
+                }
+                else
+                {
+                    const char* what = eng == 0 ? (v < 0.3f ? "ECHO" : v < 0.65f ? "SUSTAIN" : "SWELL")
+                                     : (v < 0.28f ? "TUNE" : v < 0.62f ? "UNISON" : "RAINBOW");
+                    footer = juce::String (what) + " " + pct;
+                }
             }
             else footer = (id == "chaos" ? "CHAOS " : "MIX ") + pct;
         }
@@ -836,14 +900,22 @@ void UnitView::renderFx (juce::Image& img)
             footer = root < 0 ? juce::String ("KEY --") : "KEY " + juce::String (names[root]) + (proc.keyDetector.uiMinor.load() ? " MIN" : " MAJ");
         }
         c.small (footer, (float) scrX + 4, fy, col::glow);
-        if (frozen && std::fmod (nowMs, 1000.0) < 650.0)
-            c.small ("FROZEN", (float) (scrX + scrW - 27), fy, col::seg);
+        if (frozen)
+        {
+            if (std::fmod (nowMs, 1000.0) < 650.0) c.small ("FROZEN", (float) (scrX + scrW - 27), fy, col::seg);
+        }
+        else if (proc.keyDetector.uiSection.load() > 0 && footer.length() <= 13)
+        {
+            // what the song brain hears right now
+            const float e = proc.keyDetector.uiEnergy.load();
+            c.small (e < 0.35f ? "CALM" : e < 0.7f ? "BUILD" : "PEAK", (float) (scrX + scrW - 23), fy, col::phos);
+        }
     }
 
     // --- Engine buttons ---
     c.bevel (6, 91, 116, 21, col::panel, 2, false);
     const auto names = ChaosGrainProcessor::engineNames();
-    for (int i = 0; i < 2; ++i)
+    for (int i = 0; i < 3; ++i)
     {
         const bool on = i == eng;
         drawMiniButton (c, engineRects[i], on, col::led);

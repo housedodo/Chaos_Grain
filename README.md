@@ -34,21 +34,40 @@ The instrument lives on one compact pixel-art "grain unit" (the FX version is de
 The deeper settings below (position, spray, slices, reverse...) have no knob of their own; they are
 set by the presets and RAND, and every one of them can be automated from your DAW.
 
-## ChaosGrain FX: two engines, three knobs
+## ChaosGrain FX: three engines, three knobs
 
 
-The effect version is deliberately minimal: **two engine buttons** and **three knobs**. Each
+The effect version is deliberately minimal: **three engine buttons** and **three knobs**. Each
 engine is a complex chain inside; the knobs are macros.
 
-| | **RESONATE** | **SPECTRAL** |
-|---|---|---|
-| Idea | Clean chord resonance: resonators tune to the notes you play and are fed by your sound. Every chord change crossfades to fresh resonators (no smearing); layers are octaves only (warm sub, +1 / +2 octave shimmer); BLOOM swells when you stop | Frequency processing of your sound |
-| **SHAPE** | size: short echo -> long sustain -> long, wide, warm pad (more shimmer, darker ring, bigger space) | TUNE (frequencies pulled to the key) -> UNISON (detuned copies + octaves/fifth: wide supersaw wall) -> RAINBOW DELAY (lows echo early, highs late; repeats climb an octave near the top) |
-| **CHAOS** | gentle detune drift + re-plucks of your last notes on the beat | slow drift of emphasis, harmonic swells and unison detune; rainbow band timing reshuffles on the beat |
-| **MIX** | dry / wet | dry / wet |
+| | **RESONATE** | **SPECTRAL** | **EVOLVE** |
+|---|---|---|---|
+| Idea | Clean chord resonance: resonators tune to the notes you play and are fed by your sound. Every chord change crossfades to fresh resonators (no smearing); layers are octaves only (warm sub, +1 / +2 octave shimmer); BLOOM swells when you stop | Frequency processing of your sound | Grows with your playing: about one minute of playing to full, unlocking SPACE -> RESONATE (your most played notes ring on) -> ECHOES (in your tempo) -> DRONE (key root + fifth) -> SHIMMER (octave up). Falls back slowly when you stop. Remembers strong moments and answers in your pauses with fragments of them (reversed, octave up, half speed - always in key) |
+| **SHAPE** | size: short echo -> long sustain -> long, wide, warm pad (more shimmer, darker ring, bigger space) | TUNE (frequencies pulled to the key) -> UNISON (detuned copies + octaves/fifth: wide supersaw wall) -> RAINBOW DELAY (lows echo early, highs late; repeats climb an octave near the top) | growth speed: about 2 min (left), 1 min (default), 15 s (right) |
+| **CHAOS** | gentle detune drift + re-plucks of your last notes on the beat | slow drift of emphasis, harmonic swells and unison detune; rainbow band timing reshuffles on the beat | how much it improvises (echo times, octave jumps, how often it answers) and how strongly your playing style shapes it |
+| **MIX** | dry / wet | dry / wet | dry / wet |
+| **FREEZE** | holds the chord | holds the spectrum | holds the current stage and loops the sound |
+
+### The song brain
+
+All engines share a listener that builds a picture of the song while you play: **energy**
+(calm / build / peak, relative to the last minute), **density** (notes per second), **brightness**,
+**sustain** (held vs. staccato), **register** and **harmony**, plus **section changes** (when the last
+few seconds clearly differ from the last ~12 s). The screen shows `CALM`, `BUILD` or `PEAK`.
+
+- The song steers hidden settings around your knobs, and **CHAOS sets how much**. RESONATE rings
+  longer on calm, held playing and shorter on busy playing, adds shimmer when bright and sub when
+  low. SPECTRAL widens the unison at high energy, shortens the rainbow when busy and climbs more
+  when bright. EVOLVE picks rhythmic echoes for busy playing, pads/drone for held or low playing
+  and shimmer for bright playing.
+- The randomness is **seeded by the song**: the same progression gives the same moves, and a new
+  section brings new ones. Changes land on bar lines and blend in over about two bars.
+- **LOCK** keeps the current pattern; **double-click** the screen for a new variation (in EVOLVE
+  this also resets its growth and memory).
 
 - **Auto key**: ChaosGrain FX listens to what you play and works out the key (shown on the screen,
-  e.g. `KEY A MIN`) and which notes you are playing (RESONATE shows them on its strings).
+  e.g. `KEY A MIN`) and which notes you are playing (RESONATE shows them on its strings; EVOLVE shows
+  a growing plant: one leaf per stage, a flower for SHIMMER, seeds for its memories).
   SPECTRAL tunes to the key. No key knob needed.
 - **Tempo** always follows the DAW (the grid step, 1/16 by default, is in the right-click menu).
 - **Click the screen** (or the red button) to **FREEZE**; **double-click the screen** for a new
@@ -65,7 +84,7 @@ engine is a complex chain inside; the knobs are macros.
 | Goes on | an instrument / MIDI track | any audio track (guitar, synth, vocals, bus) |
 | Sound source | a loaded sample | the live input |
 | Knobs | SIZE · CHAOS · PITCH + small knobs | SHAPE · CHAOS · MIX |
-| Buttons | HOLD · SYNC · RAND · LOCK | RESONATE · SPECTRAL + FREEZE |
+| Buttons | HOLD · SYNC · RAND · LOCK | RESONATE · SPECTRAL · EVOLVE + FREEZE |
 
 - **Filter / Reso / Space** (instrument): resonant low-pass on the grains, and reverb.
 

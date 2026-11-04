@@ -28,6 +28,9 @@ public:
         double stepBeats = 0.25;
         int keyRoot = 0;
         bool minor = false, keyValid = false;
+        // song brain (smoothed, changes land on bar lines); CHAOS sets how much it steers
+        float energy = 0.5f, density = 0.3f, brightness = 0.5f, sustain = 0.5f, reg = 0.5f;
+        juce::uint32 songSeed = 1;
     };
 
     void prepare (double sampleRate, int maxBlock);
@@ -84,7 +87,7 @@ private:
 
     StepClock clock;
     juce::Random seeds, patternRng, nudgeNoise;
-    juce::int64 seed = 1;
+    juce::int64 seed = 1, userSeed = 0;
     std::atomic<bool> newVoicing { false };
     float hpState = 0.0f;
 };

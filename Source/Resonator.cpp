@@ -127,11 +127,13 @@ void Resonator::onStep (juce::int64 step, const Params& p)
 {
     if (((step % 16) + 16) % 16 == 0 || newVoicing.load())
     {
-        if (newVoicing.exchange (false) || ! p.lock) seed = seeds.nextInt64();
+        // song-seeded: the same harmony gives the same moves, a new section new ones
+        if (newVoicing.exchange (false)) userSeed = seeds.nextInt64();
+        if (! p.lock) seed = (juce::int64) ((juce::uint64) p.songSeed * 6364136223846793005ULL + (juce::uint64) (((step / 16) % 4 + 4) % 4) * 1442695040888963407ULL + (juce::uint64) userSeed);
         patternRng.setSeed (seed);
     }
     // Re-pluck: feed the last ~30 ms of your playing back into the resonators.
-    if (! p.freeze && patternRng.nextFloat() < p.chaos * 0.45f)
+    if (! p.freeze && patternRng.nextFloat() < p.chaos * 0.45f * (0.6f + 0.8f * p.density))
     {
         replayStart = (histPos - replayLen + (int) hist.size()) % (int) hist.size();
         replayPos = 0;
@@ -157,9 +159,14 @@ void Resonator::process (const float* inL, const float* inR, float* outL, float*
     if ((int) duckBuf.size() < n) duckBuf.resize ((size_t) n, 1.0f);
 
     const float s = juce::jlimit (0.0f, 1.0f, p.shape);
-    const float t60 = p.freeze ? 1000.0f : 0.5f * std::pow (60.0f, s);   // 0.5 s .. 30 s
-    const float shimmer = 0.3f + 0.7f * s;                              // octave shimmer from the start
-    const float layerGain[3] = { 0.5f + 0.3f * s, 0.7f * shimmer, 0.45f * shimmer };
+    // Song steering (by CHAOS): calm, held playing rings longer, busy playing shorter;
+    // bright playing gets more shimmer, low playing more sub.
+    const float a = juce::jlimit (0.0f, 1.0f, p.chaos);
+    const float decayMul = juce::jlimit (0.4f, 2.5f, std::pow (2.0f, a * (1.0f * (p.sustain - 0.5f) - 1.5f * (p.density - 0.3f))));
+    const float t60 = p.freeze ? 1000.0f : 0.5f * std::pow (60.0f, s) * decayMul;   // 0.5 s .. 30 s
+    const float shimmer = (0.3f + 0.7f * s) * juce::jlimit (0.3f, 1.7f, 1.0f + a * 1.2f * (p.brightness - 0.5f));
+    const float subMul = juce::jlimit (0.4f, 1.7f, 1.0f + a * 1.2f * (0.5f - p.reg));
+    const float layerGain[3] = { (0.5f + 0.3f * s) * subMul, 0.7f * shimmer, 0.45f * shimmer };
     const float duckDepth = p.freeze ? 0.0f : 0.3f + 0.45f * s;         // BLOOM
     const float swell = p.freeze ? 1.0f : 1.0f + 0.8f * s;
     const float fc = 8000.0f - 3500.0f * s;                             // warmer as it grows
@@ -181,7 +188,7 @@ void Resonator::process (const float* inL, const float* inR, float* outL, float*
 
     // Tuning for this block (gentle chorus: +-4 cents, CHAOS adds up to +-4 cents of drift)
     lfo += (float) n / (float) sr * juce::MathConstants<float>::twoPi * 0.11f;
-    const float spread = 4.0f, drift = 4.0f * p.chaos * std::sin (lfo);
+    const float spread = 4.0f, drift = 4.0f * p.chaos * (0.5f + p.energy) * std::sin (lfo);
     std::array<std::array<float, numVoices>, 2> gL {}, gR {}, inGain {};
     std::array<std::array<std::array<float, numLayers>, numVoices>, 2> gLay {};
     for (int bi = 0; bi < 2; ++bi)

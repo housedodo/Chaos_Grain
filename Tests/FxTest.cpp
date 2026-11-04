@@ -1,4 +1,4 @@
-// Offline checks for ChaosGrain FX (RESONATE / SPECTRAL / PATTERN). Usage:
+// Offline checks for ChaosGrain FX (RESONATE / SPECTRAL / EVOLVE + song brain). Usage:
 //   FxTest <input.wav> <outdir> [screenshotPrefix]
 #include <juce_audio_processors/juce_audio_processors.h>
 #include <juce_audio_formats/juce_audio_formats.h>
@@ -448,6 +448,111 @@ int main (int argc, char** argv)
         check (ok, "engine switching: finite and bounded", 1.0f);
     }
 
+    // 9. Song brain: busy + loud, then calm + soft -> energy and density drop, a new section
+    {
+        auto busy = plucks ({ 220.0f, 261.63f, 329.63f, 392.0f, 440.0f, 329.63f }, 0.125, 16.0);
+        auto calm = sawChord ({ 220.0f, 261.63f, 329.63f }, 16.0, 16.0);
+        calm.applyGain (0.15f);
+        juce::AudioBuffer<float> both (1, busy.getNumSamples() + calm.getNumSamples());
+        both.copyFrom (0, 0, busy, 0, 0, busy.getNumSamples());
+        both.copyFrom (0, busy.getNumSamples(), calm, 0, 0, calm.getNumSamples());
+        Rig r (both);
+        r.set ("engine", 0.0f);
+        r.run (15.5);
+        const auto busyState = r.proc->keyDetector.song();
+        r.run (15.5);
+        const auto calmState = r.proc->keyDetector.song();
+        std::printf ("   (busy: energy %.2f density %.2f bright %.2f sustain %.2f | calm: energy %.2f density %.2f bright %.2f sustain %.2f | sections %d)\n",
+                     busyState.energy, busyState.density, busyState.brightness, busyState.sustain,
+                     calmState.energy, calmState.density, calmState.brightness, calmState.sustain, calmState.section);
+        check (busyState.density > calmState.density + 0.2f, "song brain: busy playing is denser (density gap)", busyState.density - calmState.density);
+        check (calmState.energy < 0.5f, "song brain: calm part reads as calm (energy)", calmState.energy);
+        check (calmState.sustain > busyState.sustain, "song brain: held chord reads as sustained (gap)", calmState.sustain - busyState.sustain);
+        check (calmState.section > busyState.section && busyState.section >= 1, "song brain: change detected as a new section", (float) calmState.section);
+    }
+
+    // 10. EVOLVE grows over about a minute of playing, faster with SHAPE, falls back in silence
+    {
+        auto arp = plucks ({ 220.0f, 261.63f, 329.63f, 440.0f, 293.66f, 349.23f, 220.0f, 196.0f }, 0.25, 8.0);
+        float full = -1.0f;
+        Rig r (arp);
+        r.set ("engine", 2.0f); r.set ("mix", 1.0f);
+        for (int sec = 1; sec <= 90 && full < 0.0f; ++sec)
+        {
+            r.run (1.0);
+            if (r.proc->evolve.growth() >= 0.999f) full = (float) sec;
+        }
+        check (full > 50.0f && full < 72.0f, "evolve: full growth after ~1 min of playing (s)", full);
+
+        // resonance follows the favourite notes (A minor arpeggio: A C D E F G)
+        bool inKey = true; int voices = 0;
+        for (auto& m : r.proc->evolve.uiResMidi)
+        {
+            const int midi = (int) m.load();
+            if (midi < 0) continue;
+            ++voices;
+            const int pc = midi % 12;
+            inKey = inKey && (pc == 9 || pc == 0 || pc == 2 || pc == 4 || pc == 5 || pc == 7);
+        }
+        check (inKey && voices >= 2, "evolve: resonance on the most played notes (voices)", (float) voices);
+
+        // fully grown it stays in key: energy share on A-minor pitch classes (100 Hz .. 2 kHz)
+        {
+            auto grown = r.run (6.0);
+            double inKeyE = 0.0, allE = 0.0;
+            for (int midi = 43; midi <= 95; ++midi)
+            {
+                const double e = goertzel (grown, (int) sr, 440.0f * std::pow (2.0f, (float) (midi - 69) / 12.0f));
+                const int pc = midi % 12;
+                allE += e;
+                if (pc == 9 || pc == 11 || pc == 0 || pc == 2 || pc == 4 || pc == 5 || pc == 7) inKeyE += e;
+            }
+            check (inKeyE / allE > 0.93, "evolve: fully grown stays in key (energy share)", (float) (inKeyE / allE));
+            writeWav (outDir.getChildFile ("fx_evolve_grown.wav"), grown);
+        }
+
+        auto quiet = r.run (20.0, true);
+        check (finite (quiet) && r.proc->evolve.growth() < 0.8f && r.proc->evolve.growth() > 0.2f,
+               "evolve: falls back slowly when you stop (growth)", r.proc->evolve.growth());
+
+        Rig fast (arp);
+        fast.set ("engine", 2.0f); fast.set ("shape", 1.0f);
+        fast.run (20.0);
+        check (fast.proc->evolve.growth() >= 0.999f, "evolve: SHAPE 100% grows in under 20 s (growth)", fast.proc->evolve.growth());
+
+        Rig frozen (arp);
+        frozen.set ("engine", 2.0f);
+        frozen.run (20.0);
+        const float before = frozen.proc->evolve.growth();
+        frozen.set ("freeze", 1.0f);
+        frozen.run (10.0);
+        check (std::abs (frozen.proc->evolve.growth() - before) < 1.0e-4f, "evolve: FREEZE holds the stage (growth change)",
+               frozen.proc->evolve.growth() - before);
+    }
+
+    // 11. EVOLVE answers in pauses with remembered fragments
+    {
+        auto phrase = plucks ({ 261.63f, 329.63f, 392.0f, 523.25f }, 0.5, 10.0);
+        juce::AudioBuffer<float> withPause (1, (int) (sr * 20.0));
+        withPause.clear();
+        withPause.copyFrom (0, 0, phrase, 0, 0, phrase.getNumSamples());
+        Rig r (withPause);
+        r.set ("engine", 2.0f); r.set ("mix", 1.0f);
+        r.run (10.0);
+        const int memories = r.proc->evolve.uiMemories.load();
+        float recallSeen = 0.0f;
+        juce::AudioBuffer<float> pause (2, 0);
+        for (int k = 0; k < 40; ++k)
+        {
+            auto part = r.run (0.25);
+            recallSeen = juce::jmax (recallSeen, r.proc->evolve.uiRecall.load());
+            if (k >= 20) { const int at = pause.getNumSamples(); pause.setSize (2, at + part.getNumSamples(), true); for (int ch = 0; ch < 2; ++ch) pause.copyFrom (ch, at, part, ch, 0, part.getNumSamples()); }
+        }
+        check (memories >= 3, "evolve: remembers strong moments (count)", (float) memories);
+        check (recallSeen > 0.5f, "evolve: answers in the pause (recall level)", recallSeen);
+        check (rms (pause) > 0.002f && finite (pause), "evolve: still audible 5-10 s into the pause (rms)", rms (pause));
+    }
+
     // Screenshots of the three engines
     if (argc > 3)
     {
@@ -455,7 +560,7 @@ int main (int argc, char** argv)
         {
             Rig r (music);
             r.set ("engine", (float) e); r.set ("shape", e == 0 ? 0.4f : 0.45f);
-            r.run (5.0);
+            r.run (e == 2 ? 50.0 : 5.0);
             std::unique_ptr<juce::AudioProcessorEditor> ed (r.proc->createEditor());
             ed->setVisible (true);
             r.run (0.3);

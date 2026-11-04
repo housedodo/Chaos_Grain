@@ -31,9 +31,29 @@ public:
     std::atomic<int> uiRoot { -1 };
     std::atomic<bool> uiMinor { false };
 
+    // ---- Song brain: a rolling picture of the song, shared by all engines ----
+    struct SongState
+    {
+        float energy = 0.0f;      // calm 0 .. intense 1 (relative to the loudest of the last minute)
+        float density = 0.0f;     // sparse 0 .. busy 1 (notes per second)
+        float brightness = 0.5f;  // dark 0 .. bright 1
+        float sustain = 0.5f;     // staccato 0 .. held 1
+        float reg = 0.5f;         // low 0 .. high 1 (register of the tracked notes)
+        bool playing = false;
+        int section = 0;          // increments on every detected section change
+        juce::uint32 seed = 1;    // from the section's harmonic colour: same progression -> same seed
+    };
+    const SongState& song() const { return songState; }
+    float playingSeconds() const { return playTime; }
+    std::array<float, 12> favouritePitchClasses() const { return noteUse; } // long-term note usage (tracked notes)
+
+    std::atomic<float> uiEnergy { 0.0f }, uiDensity { 0.0f };
+    std::atomic<int> uiSection { 0 };
+
 private:
     void analyse();
     void trackNotes (float total);
+    void updateSong (float total, const std::array<float, 12>& frame);
 
     static constexpr int order = 12, size = 1 << order, hop = size / 2;
     juce::dsp::FFT fft { order };
@@ -48,6 +68,16 @@ private:
     int keyRoot = 0, framePc = -1;
     bool minor = false, valid = false;
     float currentScore = -1.0f;
+
+    SongState songState;
+    float playTime = 0.0f;
+    float rmsFast = 0.0f, rmsSlow = 0.0f, rmsPeak = 1.0e-4f, onsetRate = 0.0f, prevFrameEnergy = 0.0f;
+    float sustainAcc = 0.5f, sectionCooldown = 0.0f;
+    std::array<float, 12> shortChroma {}, longChroma {}, sectionChroma {};
+    std::array<float, size / 2> prevMag {};
+    bool prevOnset = false;
+    std::array<float, 12> noteUse {};
+    float shortBright = 0.5f, longBright = 0.5f, shortEnergy = 0.0f, longEnergy = 0.0f;
 
     std::array<int, maxNotes> notes {}, candidate {};
     int numNotes = 0, numCandidate = 0, candidateFrames = 0;

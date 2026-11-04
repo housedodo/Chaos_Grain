@@ -139,6 +139,7 @@ void ChaosGrainProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
     engine.prepare (sampleRate);
     resonator.prepare (sampleRate, samplesPerBlock);
     spectral.prepare (sampleRate);
+    evolve.prepare (sampleRate, samplesPerBlock);
     keyDetector.prepare (sampleRate);
     lastEngine = -1;
     dryBuffer.setSize (2, juce::jmax (1, samplesPerBlock), false, false, true);
@@ -373,6 +374,32 @@ void ChaosGrainProcessor::newVariation()
     engine.requestNewPattern();
     resonator.requestNewVoicing();
     spectral.requestNewPattern();
+    evolve.requestReset();
+}
+
+void ChaosGrainProcessor::updateSteer (const TransportInfo& transport, int n)
+{
+    const double sr = getSampleRate() > 0.0 ? getSampleRate() : 44100.0;
+    const double bpm = transport.bpm > 0.0 ? transport.bpm : 120.0;
+    if (transport.isPlaying) steerBarPos = transport.ppqAtBlockStart / 4.0;
+    else steerBarPos += (double) n * bpm / 60.0 / sr / 4.0;
+    const auto bar = (juce::int64) std::floor (steerBarPos);
+    if (bar != steerBar)
+    {
+        if (steerBar < 0) steer = keyDetector.song();
+        steerBar = bar;
+        steerTarget = keyDetector.song();   // changes land on bar lines...
+        steer.seed = steerTarget.seed;
+        steer.section = steerTarget.section;
+    }
+    // ...and blend in over about two bars
+    const float a = 1.0f - std::exp (-(float) n / (float) (2.0 * 4.0 * 60.0 / bpm * sr));
+    steer.energy += (steerTarget.energy - steer.energy) * a;
+    steer.density += (steerTarget.density - steer.density) * a;
+    steer.brightness += (steerTarget.brightness - steer.brightness) * a;
+    steer.sustain += (steerTarget.sustain - steer.sustain) * a;
+    steer.reg += (steerTarget.reg - steer.reg) * a;
+    steer.playing = keyDetector.song().playing;
 }
 
 void ChaosGrainProcessor::processFx (juce::AudioBuffer<float>& buffer, const TransportInfo& transport)
@@ -400,6 +427,7 @@ void ChaosGrainProcessor::processFx (juce::AudioBuffer<float>& buffer, const Tra
     {
         resonator.reset();
         spectral.reset();
+        evolve.reset();
         engine.killAllGrains();
         lastEngine = eng;
     }
@@ -407,6 +435,12 @@ void ChaosGrainProcessor::processFx (juce::AudioBuffer<float>& buffer, const Tra
     float* wl = buffer.getWritePointer (0);
     float* wr = numCh > 1 ? buffer.getWritePointer (1) : nullptr;
     float space = 0.3f;
+    updateSteer (transport, n);
+    auto steerInto = [this] (auto& prm)
+    {
+        prm.energy = steer.energy; prm.density = steer.density; prm.brightness = steer.brightness;
+        prm.sustain = steer.sustain; prm.reg = steer.reg; prm.songSeed = steer.seed;
+    };
 
     if (eng == 0)
     {
@@ -417,16 +451,28 @@ void ChaosGrainProcessor::processFx (juce::AudioBuffer<float>& buffer, const Tra
         Resonator::Params rp;
         rp.shape = shape; rp.chaos = chaos; rp.freeze = freeze; rp.lock = lock; rp.stepBeats = stepBeats;
         rp.keyRoot = root; rp.minor = minor; rp.keyValid = keyValid;
+        steerInto (rp);
         resonator.process (dl, dr, wl, wr, n, rp, transport);
         space = 0.15f + 0.55f * shape; // bigger, longer space as the pad grows
     }
-    else
+    else if (eng == 1)
     {
         Spectral::Params sp;
         sp.shape = shape; sp.chaos = chaos; sp.freeze = freeze; sp.lock = lock; sp.stepBeats = stepBeats;
         sp.keyRoot = root; sp.minor = minor; sp.keyValid = keyValid;
+        steerInto (sp);
         spectral.process (dl, dr, wl, wr, n, sp, transport);
         space = 0.3f;
+    }
+    else
+    {
+        Evolve::Params ep;
+        ep.shape = shape; ep.chaos = chaos; ep.freeze = freeze; ep.lock = lock; ep.stepBeats = stepBeats;
+        ep.keyRoot = root; ep.minor = minor; ep.keyValid = keyValid;
+        ep.song = steer;
+        ep.favourites = keyDetector.favouritePitchClasses();
+        evolve.process (dl, dr, wl, wr, n, ep, transport);
+        space = 0.2f + 0.65f * evolve.growth(); // the room widens as it grows
     }
 
     // Level match: keep the processed sound near the input's loudness, so every engine

@@ -59,7 +59,8 @@ foreach(target ChaosGrain ChaosGrainFX)
         Source/UnitView.cpp
         Source/KeyDetector.cpp
         Source/Resonator.cpp
-        Source/Spectral.cpp)
+        Source/Spectral.cpp
+        Source/Evolve.cpp)
 
     target_compile_definitions(${target} PUBLIC
         JUCE_WEB_BROWSER=0

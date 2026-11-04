@@ -44,7 +44,8 @@ void Spectral::process (const float* inL, const float* inR, float* outL, float* 
     if (newPattern.exchange (false)) // "new variation": new motion and a new rainbow pattern
     {
         motionOffset = rng.nextFloat();
-        seed = seeds.nextInt64();
+        userSeed = seeds.nextInt64();
+        seed ^= userSeed;
         patternRng.setSeed (seed);
     }
 
@@ -60,7 +61,8 @@ void Spectral::process (const float* inL, const float* inR, float* outL, float* 
             lastBeat = beat;
             if (((beat % 16) + 16) % 16 == 0)
             {
-                if (! p.lock) seed = seeds.nextInt64();
+                // song-seeded: same harmony -> same moves, a new section -> new ones
+                if (! p.lock) seed = (juce::int64) ((juce::uint64) p.songSeed * 6364136223846793005ULL + (juce::uint64) (((beat / 16) % 4 + 4) % 4) * 1442695040888963407ULL + (juce::uint64) userSeed);
                 patternRng.setSeed (seed);
             }
             for (auto& o : bandOffset) o = patternRng.nextFloat();
@@ -176,7 +178,7 @@ void Spectral::processFrame (Channel& c, int chIndex, const Params& p)
     if (sUni > 0.0f)
     {
         // Unison detune (cents), mirrored between left and right for width, drifting with CHAOS
-        const float detune = (6.0f + 22.0f * sUni) * (1.0f + 0.35f * chaos * std::sin (twoPi * (float) (barPos / 2.0 + motionOffset)));
+        const float detune = (6.0f + 22.0f * sUni) * juce::jlimit (0.5f, 1.6f, 1.0f + chaos * (p.energy - 0.4f)) * (1.0f + 0.35f * chaos * std::sin (twoPi * (float) (barPos / 2.0 + motionOffset)));
         const float side = chIndex == 0 ? 1.0f : -1.0f;
         const float ratios[numLayers] = { 0.5f, 2.0f, 1.5f,
                                           std::pow (2.0f, side * detune / 1200.0f), std::pow (2.0f, -side * 0.5f * detune / 1200.0f) };
@@ -212,9 +214,12 @@ void Spectral::processFrame (Channel& c, int chIndex, const Params& p)
     // --- Rainbow delay: per-band echo times (lows early, highs late) with feedback ---
     if (sRain > 0.0f)
     {
-        const float maxDelay = 8.0f + 48.0f * sRain;              // frames (~10.7 ms each at 48 kHz)
+        // song steering: busy playing -> shorter rainbow, bright playing -> more octave climb
+        const float maxDelay = juce::jlimit (6.0f, (float) maxEchoFrames - 2.0f,
+                                             (8.0f + 48.0f * sRain) * juce::jlimit (0.5f, 1.3f, 1.0f - chaos * (p.density - 0.3f)));
         const float fb = 0.35f + 0.35f * sRain;
-        const float climb = juce::jlimit (0.0f, 1.0f, (sRain - 0.6f) / 0.4f) * 0.55f; // octave-up repeats
+        const float climb = juce::jlimit (0.0f, 0.7f, juce::jlimit (0.0f, 1.0f, (sRain - 0.6f) / 0.4f) * 0.55f
+                                                      + chaos * juce::jmax (0.0f, p.brightness - 0.5f) * 0.4f * sRain); // octave-up repeats
         const float mixEcho = 0.9f * sRain;
         const float logBins = std::log ((float) bins);
         float* echoBase = c.echo.data();

@@ -43,6 +43,13 @@ void KeyDetector::reset()
     framePc = -1;
     numNotes = numCandidate = candidateFrames = 0;
     currentScore = -1.0f;
+    songState = SongState {};
+    playTime = 0.0f;
+    rmsFast = rmsSlow = onsetRate = prevFrameEnergy = 0.0f;
+    rmsPeak = 1.0e-4f; sustainAcc = 0.5f; sectionCooldown = 0.0f;
+    shortChroma.fill (0.0f); longChroma.fill (0.0f); sectionChroma.fill (0.0f);
+    prevMag.fill (0.0f); prevOnset = false; noteUse.fill (0.0f);
+    shortBright = longBright = 0.5f; shortEnergy = longEnergy = 0.0f;
     uiRoot.store (-1);
 }
 
@@ -89,8 +96,19 @@ void KeyDetector::analyse()
         total += m * m;
     }
 
-    if (total < 1.0e-3f) { framePc = -1; return; } // silence: keep the current key and notes
+    if (total < 1.0e-3f) // silence: keep the current key and notes
+    {
+        framePc = -1;
+        std::array<float, 12> none {};
+        updateSong (0.0f, none);
+        return;
+    }
     trackNotes (total);
+    {
+        std::array<float, 12> fr = frame;
+        for (auto& v : fr) v /= total;
+        updateSong (total, fr);
+    }
 
     int bestPc = 0;
     for (int i = 0; i < 12; ++i)
@@ -211,4 +229,97 @@ void KeyDetector::trackNotes (float total)
         notes = found;
         numNotes = count;
     }
+}
+
+void KeyDetector::updateSong (float total, const std::array<float, 12>& frame)
+{
+    const float dt = (float) hop / (float) sr;                    // seconds per analysis frame
+    auto smooth = [dt] (float& v, float target, float seconds) { v += (target - v) * (1.0f - std::exp (-dt / seconds)); };
+
+    // Loudness of this frame (from the FFT energy), its envelopes and the minute-long peak
+    const float level = std::sqrt (total) / (float) size;
+    const bool playing = level > 2.0e-4f;
+    if (playing) playTime += dt;
+    smooth (rmsFast, level, 0.15f);
+    smooth (rmsSlow, level, 4.0f);
+    rmsPeak = juce::jmax (rmsSlow, rmsPeak * std::exp (-dt / 60.0f), 1.0e-4f);
+
+    // Onsets per second -> density. Onset = spectral flux: how much new energy appeared
+    // since the last frame, relative to the frame's total.
+    float flux = 0.0f, sum = 0.0f;
+    for (int k = 1; k < size / 2; ++k)
+    {
+        const float m = data[(size_t) k];
+        flux += juce::jmax (0.0f, m - prevMag[(size_t) k]);
+        sum += m;
+        prevMag[(size_t) k] = m;
+    }
+    const bool rising = playing && sum > 0.0f && flux > 0.2f * sum && level > prevFrameEnergy * 1.05f;
+    const bool onset = rising && ! prevOnset;
+    prevOnset = rising;
+    prevFrameEnergy = level;
+    smooth (onsetRate, onset ? 1.0f / dt : 0.0f, 6.0f);
+
+    // Brightness: spectral centroid of this frame
+    if (playing)
+    {
+        float num = 0.0f, den = 0.0f;
+        for (int k = 1; k < size / 2; ++k)
+        {
+            const float f = (float) k * (float) sr / (float) size;
+            num += f * data[(size_t) k]; den += data[(size_t) k];
+        }
+        const float centroid = den > 0.0f ? num / den : 1000.0f;
+        const float b = juce::jlimit (0.0f, 1.0f, std::log (centroid / 300.0f) / std::log (5000.0f / 300.0f));
+        smooth (shortBright, b, 2.0f);
+        smooth (longBright, b, 12.0f);
+        smooth (sustainAcc, onset ? 0.0f : 1.0f, 3.0f);
+        std::array<float, 12> held {};
+        for (int k = 0; k < numNotes; ++k) held[(size_t) (notes[(size_t) k] % 12)] += 1.0f / (float) numNotes;
+        for (int i = 0; i < 12; ++i)
+        {
+            smooth (shortChroma[(size_t) i], frame[(size_t) i], 2.0f);
+            smooth (longChroma[(size_t) i], frame[(size_t) i], 15.0f);
+            if (numNotes > 0) smooth (noteUse[(size_t) i], held[(size_t) i], 20.0f);
+        }
+    }
+    smooth (shortEnergy, rmsFast / rmsPeak, 1.0f);
+    smooth (longEnergy, rmsSlow / rmsPeak, 12.0f);
+
+    auto& s = songState;
+    s.playing = playing;
+    s.energy = juce::jlimit (0.0f, 1.0f, rmsSlow / rmsPeak);
+    s.density = juce::jlimit (0.0f, 1.0f, onsetRate / 6.0f);
+    s.brightness = shortBright;
+    s.sustain = juce::jlimit (0.0f, 1.0f, sustainAcc);
+    if (numNotes > 0)
+    {
+        float m = 0.0f;
+        for (int i = 0; i < numNotes; ++i) m += (float) notes[(size_t) i];
+        s.reg += (juce::jlimit (0.0f, 1.0f, (m / (float) numNotes - 36.0f) / 48.0f) - s.reg) * 0.05f;
+    }
+
+    // Section change: the last ~2 s differ clearly from the last ~12 s (energy, brightness, harmony)
+    sectionCooldown = juce::jmax (0.0f, sectionCooldown - dt);
+    if (playing && playTime > 6.0f && sectionCooldown <= 0.0f)
+    {
+        float harm = 0.0f;
+        for (int i = 0; i < 12; ++i) harm += std::abs (shortChroma[(size_t) i] - sectionChroma[(size_t) i]);
+        const float novelty = 1.5f * std::abs (shortEnergy - longEnergy) + 1.2f * std::abs (shortBright - longBright) + 0.6f * harm;
+        if (novelty > 0.9f || s.section == 0)
+        {
+            ++s.section;
+            sectionCooldown = 8.0f;
+            sectionChroma = shortChroma;
+            // seed from the section's harmonic colour: its three strongest pitch classes + key
+            std::array<int, 12> idx {};
+            for (int i = 0; i < 12; ++i) idx[(size_t) i] = i;
+            std::sort (idx.begin(), idx.end(), [this] (int a, int b) { return shortChroma[(size_t) a] > shortChroma[(size_t) b]; });
+            s.seed = (juce::uint32) (idx[0] * 144 + idx[1] * 12 + idx[2] + 1) * 2654435761u ^ (juce::uint32) (keyRoot * 7 + (minor ? 1 : 0));
+        }
+    }
+
+    uiEnergy.store (s.energy);
+    uiDensity.store (s.density);
+    uiSection.store (s.section);
 }
