@@ -277,6 +277,66 @@ namespace
         return "-";
     }
 
+    // Demos 6 + 7: one saw chord (A minor 7) - SAW: through every engine; COMPARE: dry vs EVOLVE
+    bool sawDemo = false, compareDemo = false;
+    constexpr double sawLength = 106.0, compareLength = 96.0;
+    const TourScene sawScenes[] = {
+        { 0.0,  0, 0.35f, 0.3f,  0.0f,  false }, { 6.0,  0, 0.35f, 0.3f,  0.6f, false }, { 14.0, 0, 0.8f, 0.3f, 0.65f, false },
+        { 22.0, 0, 0.8f,  0.55f, 0.65f, false }, { 30.0, 1, 0.2f,  0.3f,  0.6f, false }, { 38.0, 1, 0.5f, 0.3f, 0.6f,  false },
+        { 46.0, 1, 0.9f,  0.3f,  0.55f, false }, { 56.0, 2, 1.0f,  0.5f,  0.65f, false }, { 100.0, 2, 1.0f, 0.5f, 0.65f, true } };
+    const std::vector<Caption> sawCaptions = {
+        { 0.0,  "INPUT",     "SAW CHORD",   { "A MINOR 7: A2 E3 G3 C4 E4.", "PLAIN SAWTOOTH, HELD ~2 BARS,", "DRY (MIX 0%)." } },
+        { 6.0,  "ENGINE 1",  "RESONATE",    { "SHAPE 35%: RESONATORS TUNE", "TO THE CHORD AND RING ON", "BETWEEN THE HITS." } },
+        { 14.0, "SHAPE 80%", "BLOOM PAD",   { "SUB OCTAVE + SHIMMER, IT", "SWELLS UP WHEN THE CHORD", "STOPS." } },
+        { 22.0, "CHAOS 55%", "MOVEMENT",    { "SLOW DETUNE DRIFT AND", "RE-PLUCKS ON THE BEAT." } },
+        { 30.0, "ENGINE 2",  "TUNE",        { "SPECTRAL 20%: THE KEY'S", "NOTES SING, THE REST IS", "PULLED DOWN." } },
+        { 38.0, "SHAPE 50%", "UNISON",      { "DETUNED COPIES L/R + OCTAVES", "AND A FIFTH: A SUPERSAW", "WALL FROM ONE SAW." } },
+        { 46.0, "SHAPE 90%", "RAINBOW",     { "LOWS ECHO FIRST, HIGHS", "LATER, REPEATS CLIMB AN", "OCTAVE." } },
+        { 56.0, "ENGINE 3",  "EVOLVE",      { "SHAPE 100% = FULL GROWTH IN", "~15 S (DEFAULT: 1 MINUTE).", "WATCH THE PLANT." } },
+        { 74.0, "",          "FULL BLOOM",  { "RESONANCE, ECHOES, DRONE", "AND SHIMMER - ALL FROM", "THE SAME CHORD." } },
+        { 86.0, "PAUSE",     "ANSWERS",     { "YOU STOP - IT PLAYS BACK", "REMEMBERED MOMENTS: REVERSED,", "OCTAVE UP, HALF SPEED." } },
+        { 96.0, "",          "FREEZE",      { "ONE LAST CHORD, HELD." } },
+    };
+
+    // A2 E3 G3 C4 E4 band-limited saws, 3.5 s on / 0.5 s off (2 bars at 120 bpm); silent in pauses
+    juce::AudioBuffer<float> makeSawChord (double total, const std::vector<std::pair<double, double>>& pauses)
+    {
+        juce::AudioBuffer<float> b (1, (int) (total * sr));
+        b.clear();
+        const int notes[] = { 45, 52, 55, 60, 64 };
+        for (double t0 = 0.0; t0 + 3.5 <= total; t0 += 4.0)
+        {
+            bool paused = false;
+            for (auto& pz : pauses) paused |= t0 >= pz.first && t0 < pz.second;
+            if (paused) continue;
+            for (int m : notes)
+            {
+                const float f = midiHz (m);
+                for (int i = 0; i < (int) (3.5 * sr); ++i)
+                {
+                    const float tt = (float) i / (float) sr;
+                    float v = 0.0f;
+                    for (int h = 1; h <= 40 && f * (float) h < 12000.0f; ++h) v += std::sin (twoPi * f * (float) h * tt) / (float) h;
+                    const float env = juce::jmin (1.0f, tt / 0.01f) * juce::jmin (1.0f, (3.5f - tt) / 0.05f);
+                    b.addSample (0, (int) (t0 * sr) + i, 0.07f * v * env);
+                }
+            }
+        }
+        return b;
+    }
+
+    Caption compareCaption (double t, int stage, bool wet)
+    {
+        static const char* stageText[5][2] = { { "STAGE 1: SPACE - A WIDENING", "ROOM AROUND THE CHORD." },
+                                               { "STAGE 2: THE CHORD'S NOTES", "RING ON (RESONANCE)." },
+                                               { "STAGE 3: ECHOES IN TEMPO", "JOIN IN." },
+                                               { "STAGE 4: A LOW DRONE ON A", "+ E UNDERNEATH." },
+                                               { "STAGE 5: OCTAVE SHIMMER.", "FULLY GROWN." } };
+        if (t >= 80.0) return { 0, "PAUSE", "WITH EVOLVE", { "THE CHORD STOPS. EVOLVE", "ANSWERS WITH REMEMBERED", "MOMENTS. DRY = SILENCE." } };
+        if (! wet) return { 0, "A/B  4 BARS EACH", "WITHOUT", { "THE DRY SAW CHORD.", "(EVOLVE KEEPS LISTENING", "AND GROWING IN THE BACK.)" } };
+        return { 0, "A/B  4 BARS EACH", "WITH EVOLVE", { stageText[stage][0], stageText[stage][1] } };
+    }
+
     juce::String evolveInput (double t)
     {
         static const char* names[4] = { "AM7", "FMAJ7", "CMAJ7", "G6" };
@@ -418,7 +478,7 @@ namespace
 
     const Caption& captionAt (double t)
     {
-        const auto& list = tourDemo ? tourCaptions : showcaseDemo ? showcaseCaptions : resonateDemo ? resonateCaptions : captions;
+        const auto& list = sawDemo ? sawCaptions : tourDemo ? tourCaptions : showcaseDemo ? showcaseCaptions : resonateDemo ? resonateCaptions : captions;
         const Caption* c = &list.front();
         for (auto& x : list) if (t >= x.start) c = &x;
         return *c;
@@ -437,6 +497,8 @@ namespace
         if (showcaseDemo) return makeShowcase();
         if (evolveDemo) return makeEvolve();
         if (tourDemo) return makeTour();
+        if (sawDemo) return makeSawChord (sawLength, { { 86.0, 96.0 } });
+        if (compareDemo) return makeSawChord (compareLength, { { 80.0, 200.0 } });
         juce::AudioBuffer<float> b (1, (int) ((resonateDemo ? 8.0 : phrase) * sr));
         b.clear();
         auto saw = [&] (float f, double t0, double t1)
@@ -471,12 +533,14 @@ int main (int argc, char** argv)
     showcaseDemo = argc > 2 && juce::String (argv[2]) == "showcase";
     evolveDemo = argc > 2 && juce::String (argv[2]) == "evolve";
     tourDemo = argc > 2 && juce::String (argv[2]) == "tour";
+    sawDemo = argc > 2 && juce::String (argv[2]) == "saw";
+    compareDemo = argc > 2 && juce::String (argv[2]) == "compare";
 
     const juce::File outDir (argv[1]);
     outDir.createDirectory();
     const auto videoOnly = outDir.getChildFile ("video_only.mp4");
     const auto audioFile = outDir.getChildFile ("audio.wav");
-    const auto finalFile = outDir.getChildFile (tourDemo ? "ChaosGrainFX_tour.mp4" : evolveDemo ? "ChaosGrainFX_evolve_demo.mp4" : showcaseDemo ? "ChaosGrainFX_showcase.mp4"
+    const auto finalFile = outDir.getChildFile (sawDemo ? "ChaosGrainFX_saw_chord.mp4" : compareDemo ? "ChaosGrainFX_with_without_evolve.mp4" : tourDemo ? "ChaosGrainFX_tour.mp4" : evolveDemo ? "ChaosGrainFX_evolve_demo.mp4" : showcaseDemo ? "ChaosGrainFX_showcase.mp4"
                                               : resonateDemo ? "ChaosGrainFX_resonate_demo.mp4" : "ChaosGrainFX_demo.mp4");
 
     std::unique_ptr<ChaosGrainProcessor> proc (static_cast<ChaosGrainProcessor*> (createPluginFilter()));
@@ -499,7 +563,7 @@ int main (int argc, char** argv)
     retro::ditherGradient (bgLow, bgLow.getBounds(), juce::Colour (0xff24222b), juce::Colour (0xff0d0c11), 6);
 
     const auto input = makePhrase();
-    const double duration = tourDemo ? tourLength : evolveDemo ? evolveLength : showcaseDemo ? 150.0 : resonateDemo ? 74.0 : 96.0;
+    const double duration = sawDemo ? sawLength : compareDemo ? compareLength : tourDemo ? tourLength : evolveDemo ? evolveLength : showcaseDemo ? 150.0 : resonateDemo ? 74.0 : 96.0;
     const int totalFrames = (int) (duration * fps);
     juce::AudioBuffer<float> audio (2, totalFrames * blocksPerFrame * blockSize);
     audio.clear();
@@ -521,17 +585,31 @@ int main (int argc, char** argv)
         const double t = (double) f / fps;
 
  // ---------------- Script ----------------
-        if (tourDemo)
+        if (compareDemo)
         {
-            const TourScene* sc = &tourScenes[0];
-            const TourScene* prev = &tourScenes[0];
-            for (auto& x : tourScenes) if (t >= x.t) { prev = sc; sc = &x; }
+            // A/B every 4 bars (8 s): dry, then with EVOLVE (default settings); EVOLVE keeps
+            // processing (and growing) underneath while MIX is at 0
+            setP ("engine", 2.0f); setP ("shape", 0.35f); setP ("chaos", 0.5f);
+            const bool wet = t >= 80.0 || ((int) (t / 8.0) % 2) == 1;
+            const double edge = std::floor (t / 8.0) * 8.0;
+            setP ("mix", t >= 90.0 ? sweep (t, 90.0, compareLength, 0.65f, 0.0f)
+                                   : sweep (t, edge, edge + 0.15, wet ? 0.0f : 0.65f, wet ? 0.65f : 0.0f) * (t >= 80.0 || t < 8.0 ? 0.0f : 1.0f)
+                                     + (t >= 80.0 ? 0.65f : 0.0f));
+        }
+        else if (tourDemo || sawDemo)
+        {
+            const TourScene* scenes = sawDemo ? sawScenes : tourScenes;
+            const int numScenes = sawDemo ? (int) std::size (sawScenes) : (int) std::size (tourScenes);
+            const TourScene* sc = &scenes[0];
+            const TourScene* prev = &scenes[0];
+            for (int q = 0; q < numScenes; ++q) if (t >= scenes[q].t) { prev = sc; sc = &scenes[q]; }
             setP ("engine", (float) sc->engine);
             setP ("shape", sweep (t, sc->t, sc->t + 1.5, prev->engine == sc->engine ? prev->shape : sc->shape, sc->shape));
             setP ("chaos", sc->chaos);
             setP ("mix", sweep (t, sc->t, sc->t + 1.0, prev->engine == sc->engine ? prev->mix : sc->mix, sc->mix));
             setP ("freeze", sc->freeze ? 1.0f : 0.0f);
-            if (t >= 172.0) setP ("mix", sweep (t, 172.0, tourLength, sc->mix, 0.0f));
+            const double fadeAt = sawDemo ? sawLength - 3.0 : 172.0;
+            if (t >= fadeAt) setP ("mix", sweep (t, fadeAt, sawDemo ? sawLength : tourLength, sc->mix, 0.0f));
         }
         else if (evolveDemo)
         {
@@ -616,13 +694,14 @@ int main (int argc, char** argv)
             int stage = 0;
             for (int k = 1; k < 5; ++k) if (proc->evolve.uiStage[(size_t) k].load() > 0.5f) stage = k;
             const Caption evoCap = evolveCaption (t, stage);
-            const auto& cap = evolveDemo ? evoCap : captionAt (t);
-            if (tourDemo)   // live read-out under the caption
+            const Caption cmpCap = compareCaption (t, stage, proc->apvts.getRawParameterValue ("mix")->load() > 0.3f);
+            const auto& cap = compareDemo ? cmpCap : evolveDemo ? evoCap : captionAt (t);
+            if (tourDemo || sawDemo || compareDemo)   // live read-out under the caption
             {
                 static const char* pcN[12] = { "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B" };
                 auto pct = [&] (const char* id) { return juce::String (juce::roundToInt (proc->apvts.getRawParameterValue (id)->load() * 100.0f)) + "%"; };
                 juce::String info = "SHAPE " + pct ("shape") + "  CHAOS " + pct ("chaos") + "  MIX " + pct ("mix");
-                if (t >= 80.0)
+                if (tourDemo ? t >= 80.0 : (int) proc->apvts.getRawParameterValue ("engine")->load() == 2)
                 {
                     const int slot = proc->evolve.uiSection.load();
                     const int d0 = (int) proc->evolve.uiDroneMidi[0].load(), d1 = (int) proc->evolve.uiDroneMidi[1].load();
@@ -656,6 +735,11 @@ int main (int argc, char** argv)
                                   { cx, 372, cw, 20 }, retro::pal::yellow, juce::Justification::topLeft, 2);
             }
             else if (tourDemo) playing = tourInput (t);
+            else if (sawDemo || compareDemo)
+            {
+                const bool pausedNow = sawDemo ? (t >= 86.0 && t < 96.0) : t >= 80.0;
+                playing = pausedNow ? juce::String ("- (PAUSE)") : std::fmod (t, 4.0) < 3.5 ? juce::String ("SAW  AM7") : juce::String ("-");
+            }
             else if (showcaseDemo) playing = showcaseInput (t);
             else if (resonateDemo)
             {
