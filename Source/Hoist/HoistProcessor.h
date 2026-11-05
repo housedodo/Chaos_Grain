@@ -32,7 +32,7 @@ public:
     void getStateInformation (juce::MemoryBlock& destData) override;
     void setStateInformation (const void* data, int sizeInBytes) override;
 
-    static juce::StringArray stageNames() { return { "FAIR WINDS", "GREY SKIES", "SOMETHING'S WRONG", "THE DEEP", "ABYSS" }; }
+    static juce::StringArray stageNames() { return { "FAIR WEATHER", "GREY SKIES", "SOMETHING'S WRONG", "THE DEEP", "ABYSS" }; }
 
     juce::AudioProcessorValueTreeState apvts;
     HoistDSP dsp;

@@ -18,13 +18,19 @@ namespace
     float hz (int m) { return 440.0f * std::pow (2.0f, (float) (m - 69) / 12.0f); }
 
     struct Part { double start; double bpm; int tsNum, tsDen; const char* genre; };
-    const Part parts[] = { { 0.0, 100.0, 4, 4, "SYNTHWAVE" }, { 30.0, 140.0, 4, 4, "DUBSTEP" },
+    const std::vector<Part> partsMix = { { 0.0, 100.0, 4, 4, "SYNTHWAVE" }, { 30.0, 140.0, 4, 4, "DUBSTEP" },
                            { 58.0, 80.0, 4, 4, "AMBIENT PIANO" }, { 90.0, 125.0, 6, 8, "HOIST SOUNDTRACK" } };
-    constexpr double total = 158.0;
-    const Part& partAt (double t) { const Part* p = &parts[0]; for (auto& x : parts) if (t >= x.start) p = &x; return *p; }
+    // CLIP mode: your recording (F minor pad + melody, ~99 BPM 4/4, a 9.7 s loop) through the
+    // sea and the five dread stages - one section per stage, aligned to the loop
+    constexpr double L = 9.7;
+    const std::vector<Part> partsClip = { { 0.0, 99.0, 4, 4, "YOUR CLIP - F MINOR" } };
+    bool clipMode = false;
+    double total = 158.0;
+    const std::vector<Part>& parts() { return clipMode ? partsClip : partsMix; }
+    const Part& partAt (double t) { const Part* p = &parts()[0]; for (auto& x : parts()) if (t >= x.start) p = &x; return *p; }
 
     struct Scene { double t; float tide, dread, mix; bool anchor; };
-    const Scene scenes[] = {
+    const std::vector<Scene> scenesMix = {
         { 0.0, 0.2f, 0.0f, 0.0f, false },  { 5.0, 0.2f, 0.0f, 0.55f, false }, { 17.0, 0.5f, 0.0f, 0.6f, false },
         { 30.0, 0.5f, 0.3f, 0.0f, false }, { 34.0, 0.8f, 0.3f, 0.75f, false }, { 46.0, 0.97f, 0.35f, 0.8f, false },
         { 58.0, 0.15f, 0.0f, 0.0f, false },{ 62.0, 0.15f, 0.3f, 0.6f, false }, { 70.0, 0.2f, 0.58f, 0.65f, false },
@@ -33,7 +39,24 @@ namespace
         { 124.5, 0.4f, 0.8f, 0.7f, false }, { 136.0, 0.35f, 1.0f, 0.75f, false }, { 147.5, 0.35f, 1.0f, 0.75f, true } };
 
     struct Caption { double start; const char* step; const char* title; std::vector<const char*> body; };
-    const std::vector<Caption> captions = {
+    const std::vector<Scene> scenesClip = {
+        { 0.0, 0.15f, 0.0f, 0.0f, false },   { L, 0.15f, 0.0f, 0.55f, false },     { 3 * L, 0.45f, 0.0f, 0.6f, false },
+        { 5 * L, 0.85f, 0.0f, 0.6f, false }, { 6 * L, 0.3f, 0.3f, 0.6f, false },   { 8 * L, 0.3f, 0.56f, 0.65f, false },
+        { 10 * L, 0.4f, 0.76f, 0.7f, false },{ 12 * L, 0.3f, 1.0f, 0.75f, false }, { 14 * L, 0.3f, 1.0f, 0.75f, true } };
+    const std::vector<Caption> captionsClip = {
+        { 0.0,    "YOUR CLIP",  "DRY",            { "FM - DB: A DARK, WIDE PAD", "WITH A MELODY. MIX 0%." } },
+        { L,      "STAGE 1",    "FAIR WEATHER",   { "A GENTLE SWAY, A SPARKLE", "AN OCTAVE UP AND AN OPEN", "SPACE - LIKE THE HARBOUR." } },
+        { 3 * L,  "TIDE 45%",   "SWELL",          { "THE WHOLE SOUND RISES AND", "FALLS ONCE PER BAR, LIKE A", "WAVE LIFTING THE BOAT." } },
+        { 5 * L,  "TIDE 85%",   "ROUGH SEA",      { "GUSTS, UNEVEN ROCKING AND", "SPRAY. RAIN ON THE GLASS." } },
+        { 6 * L,  "STAGE 2",    "GREY SKIES",     { "TAPE WOW, WARMER AND DARKER.", "THE SPARKLE FADES." } },
+        { 8 * L,  "STAGE 3",    "SOMETHING'S WRONG", { "THE TUNE DRIFTS FLAT AND", "BENDS - A SEASICK DOUBLE." } },
+        { 10 * L, "STAGE 4",    "THE DEEP",       { "SUB OCTAVE, REVERSED GHOSTS", "AND WHISPERS IN THE DARK." } },
+        { 12 * L, "STAGE 5",    "ABYSS",          { "THE BLACK SUN. ALMOST", "NOTHING LEFT OF THE TUNE." } },
+        { 14 * L, "ANCHOR",     "HOLD",           { "DROP ANCHOR: THE LAST SOUND", "STAYS AS A DRONE." } },
+    };
+    const std::vector<Scene>& scenes() { return clipMode ? scenesClip : scenesMix; }
+
+    const std::vector<Caption> captionsMix = {
         { 0.0,   "SYNTHWAVE", "SUPERSAW DRY",  { "A SERUM-STYLE SUPERSAW:", "AM - F - C - G AT 100 BPM." } },
         { 5.0,   "TIDE 20%",  "FAIR WINDS",    { "THE SOUND ROCKS GENTLY LIKE", "A BOAT; DREAD 0 ADDS AN", "OCTAVE SHIMMER AND SPACE." } },
         { 17.0,  "TIDE 50%",  "SWELL",         { "THE TIDE PUMPS ON EVERY", "BEAT - A SIDECHAIN FEEL", "WITHOUT A KICK." } },
@@ -51,7 +74,27 @@ namespace
         { 136.0, "STAGE 5",   "ABYSS",         { "ALMOST NOTHING LEFT." } },
         { 147.5, "ANCHOR",    "HOLD",          { "ANCHOR KEEPS THE LAST SOUND", "AS A DRONE. TIDE . DREAD . MIX" } },
     };
-    const Caption& captionAt (double t) { const Caption* c = &captions.front(); for (auto& x : captions) if (t >= x.start) c = &x; return *c; }
+    const std::vector<Caption>& captions() { return clipMode ? captionsClip : captionsMix; }
+    const Caption& captionAt (double t) { const Caption* c = &captions().front(); for (auto& x : captions()) if (t >= x.start) c = &x; return *c; }
+    juce::File clipFile;
+
+    juce::AudioBuffer<float> makeClipInput (std::vector<juce::String>& labels)
+    {
+        juce::AudioFormatManager fm;
+        fm.registerBasicFormats();
+        std::unique_ptr<juce::AudioFormatReader> reader (fm.createReaderFor (clipFile));
+        juce::AudioBuffer<float> b (2, (int) (total * sr));
+        b.clear();
+        labels.assign ((size_t) total * 10 + 10, "-");
+        if (reader == nullptr) return b;
+        juce::AudioBuffer<float> clip (2, (int) reader->lengthInSamples);
+        reader->read (&clip, 0, clip.getNumSamples(), 0, true, true);
+        const int loopLen = (int) (L * sr);
+        for (int i = 0; i < b.getNumSamples(); ++i)
+            for (int ch = 0; ch < 2; ++ch) b.setSample (ch, i, clip.getSample (ch, (i % loopLen) % clip.getNumSamples()));
+        for (size_t k = 0; k < labels.size(); ++k) labels[k] = std::fmod ((double) k / 10.0, L) < L / 2 ? "YOUR CLIP  FM" : "YOUR CLIP  DB";
+        return b;
+    }
 
     float sweep (double t, double t0, double t1, float a, float b)
     {
@@ -207,11 +250,13 @@ namespace
 int main (int argc, char** argv)
 {
     juce::ScopedJuceInitialiser_GUI init;
-    if (argc < 2) { std::puts ("usage: HoistDemo <outdir>"); return 2; }
+    if (argc < 2) { std::puts ("usage: HoistDemo <outdir> [clip <48k stereo wav>]"); return 2; }
+    clipMode = argc > 3 && juce::String (argv[2]) == "clip";
+    if (clipMode) { clipFile = juce::File (argv[3]); total = 15.0 * L + 3.0; }
     const juce::File outDir (argv[1]);
     outDir.createDirectory();
     const auto videoOnly = outDir.getChildFile ("video_only.mp4"), audioFile = outDir.getChildFile ("audio.wav");
-    const auto finalFile = outDir.getChildFile ("Hoist_demo.mp4");
+    const auto finalFile = outDir.getChildFile (clipMode ? "Hoist_your_clip.mp4" : "Hoist_demo.mp4");
 
     std::unique_ptr<HoistProcessor> proc (static_cast<HoistProcessor*> (createPluginFilter()));
     Head head;
@@ -226,7 +271,7 @@ int main (int argc, char** argv)
     editor->setVisible (true);
 
     std::vector<juce::String> labels;
-    const auto input = makeInput (labels);
+    const auto input = clipMode ? makeClipInput (labels) : makeInput (labels);
     juce::Image bgLow (juce::Image::RGB, W / 4, H / 4, false);
     retro::ditherGradient (bgLow, bgLow.getBounds(), juce::Colour (0xff1c2730), juce::Colour (0xff080c10), 6);
 
@@ -247,8 +292,8 @@ int main (int argc, char** argv)
         const Part& part = partAt (t);
         if (&part != lastPart) { lastPart = &part; head.ppq = 0.0; head.bpm = part.bpm; head.num = part.tsNum; head.den = part.tsDen; }
 
-        const Scene* sc = &scenes[0]; const Scene* prev = &scenes[0];
-        for (auto& s : scenes) if (t >= s.t) { prev = sc; sc = &s; }
+        const Scene* sc = &scenes()[0]; const Scene* prev = &scenes()[0];
+        for (auto& s : scenes()) if (t >= s.t) { prev = sc; sc = &s; }
         const bool newPart = std::abs (sc->t - part.start) < 0.01;
         setP ("tide", sweep (t, sc->t, sc->t + 1.5, newPart ? sc->tide : prev->tide, sc->tide));
         setP ("dread", sweep (t, sc->t, sc->t + 2.0, newPart ? sc->dread : prev->dread, sc->dread));
@@ -259,7 +304,12 @@ int main (int argc, char** argv)
         juce::MidiBuffer midi;
         for (int b = 0; b < blocksPerFrame; ++b)
         {
-            for (int i = 0; i < blockSize; ++i) { const float s = input.getSample (0, frameStart + b * blockSize + i); blk.setSample (0, i, s); blk.setSample (1, i, s); }
+            for (int i = 0; i < blockSize; ++i)
+            {
+                const int src = juce::jmin (input.getNumSamples() - 1, frameStart + b * blockSize + i);
+                blk.setSample (0, i, input.getSample (0, src));
+                blk.setSample (1, i, input.getSample (juce::jmin (1, input.getNumChannels() - 1), src));
+            }
             proc->processBlock (blk, midi);
             head.ppq += (double) blockSize / sr * head.bpm / 60.0;
             for (int ch = 0; ch < 2; ++ch) audio.copyFrom (ch, frameStart + b * blockSize, blk, ch, 0, blockSize);

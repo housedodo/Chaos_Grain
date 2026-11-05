@@ -95,23 +95,24 @@ few seconds clearly differ from the last ~12 s). The screen shows `CALM`, `BUILD
 
 ## HOIST: tide and dread (third plugin)
 
-A small effect to put straight after any synth (Serum, 3xOsc), a piano or a pad. Two big ideas,
-three knobs and one button:
+A small effect for ambient, sea shanties and floating instrumentals, made for the game *Hoist*.
+Put it straight after a synth, a piano, an accordion or a pad. Two ideas, three controls and
+one button:
 
 | Control | What it does |
 |---|---|
-| **TIDE** | Movement, synced to your bar (4/4, 6/8, ...). **0-40% SWAY**: the sound rocks like a boat (slow pitch sway and stereo rocking). **30-80% SWELL**: a sidechain-style pump on every beat (the dotted beat in 6/8). **60-100% STORM**: a resonant filter wobble in tempo, from 1/4 up to 1/16, with grit. |
-| **DREAD** | A story in five stages (lamps 1-5): **1 FAIR WINDS** bright octave shimmer and space, **2 GREY SKIES** tape wow & flutter, warm and darker, **3 SOMETHING'S WRONG** the pitch drifts flat and bends, a seasick double, **4 THE DEEP** sub octave growl and reversed ghost tails, **5 ABYSS** the sound dissolves into dark wind. |
+| **TIDE** (helm wheel) | The sea, synced to your bar (4/4, 6/8 ...). **CALM**: the sound rocks like a boat (slow pitch sway, stereo rocking). **SWELL**: the whole sound rises and falls once per bar like a wave lifting the boat, darker in the troughs. **ROUGH SEA**: irregular gusts on a soft filter, uneven rocking and sea spray. |
+| **DREAD** (barometer) | Five stages, like the game's dread meter (five lanterns): **1 FAIR WEATHER** an octave sparkle in an open space, **2 GREY SKIES** tape wow, warmer and darker, **3 SOMETHING'S WRONG** the tune drifts flat and bends, **4 THE DEEP** sub octave, reversed ghost tails and whispers, **5 ABYSS** the sound dissolves into dark wind. |
 | **MIX** | Dry / wet (the wet side is level-matched to your input). |
-| **ANCHOR** | Holds the current sound forever as a drone while you play on top. Click the button or the screen. |
+| **ANCHOR** | Holds the current sound as a drone while you play on top. Click the anchor or the porthole. |
 
-The screen is a little boat at sea: the waves follow TIDE (lightning in a storm), the sky goes
-from a synthwave sunset to grey skies, fog, a moonlit night and the abyss as DREAD rises.
-Right-click for the UI size; double-click a knob to reset it. Hidden *Wet Gain* parameter for
-automation.
+It looks like an instrument from the ship: a brass porthole showing the Merry Gull at sea in the
+game's own five dread palettes (black sun, stars and eyes in the abyss; rain in a rough sea), five
+ship's lanterns, a helm wheel and a barometer. Right-click for the UI size; double-click a control
+to reset it. Hidden *Wet Gain* parameter for automation.
 
-Made with games in mind: automate DREAD from 0 to 100% over one loop and a cheerful track walks
-through five "dread stages" with the same tempo, key and meter.
+For the game: render one loop per dread stage (same tempo, key and meter) with DREAD at about
+10, 30, 50, 70 and 95 % so the game's crossfades line up.
 
 ## Two plugins
 

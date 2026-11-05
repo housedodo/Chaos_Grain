@@ -140,6 +140,20 @@ namespace
         for (size_t i = 0; i < x.size(); ++i) { num += (x[i] - mx) * (y[i] - my); dx += (x[i] - mx) * (x[i] - mx); dy += (y[i] - my) * (y[i] - my); }
         return (float) (num / std::sqrt (dx * dy + 1.0e-12));
     }
+    // share of the energy above 2 kHz (how bright the sound is)
+    float highShare (const juce::AudioBuffer<float>& b, int from, int len)
+    {
+        const float a = std::exp (-twoPi * 2000.0f / (float) sr);
+        float l1 = 0, l2 = 0; double hi = 0, all = 0;
+        for (int i = from; i < from + len; ++i)
+        {
+            const float x = b.getSample (0, i);
+            l1 = a * l1 + (1 - a) * x; const float h1 = x - l1;          // two one-pole high-passes at 2 kHz
+            l2 = a * l2 + (1 - a) * h1; const float h2 = h1 - l2;
+            hi += h2 * h2; all += x * x;
+        }
+        return all > 0 ? (float) (hi / all) : 0.0f;
+    }
     float centroid (const juce::AudioBuffer<float>& b, int from, int len)
     {
         double num = 0, den = 0;
@@ -222,40 +236,41 @@ int main (int argc, char** argv)
         const float cents = 1200.0f * std::log2 (hi / lo);
         check (cents > 8.0f && cents < 80.0f, "TIDE sway: gentle pitch rocking (cents p-p)", cents);
     }
-    // 4. SWELL: pump on every beat (4/4: 0.5 s at 120 bpm) - and on the dotted beat in 6/8
+    // 4. SWELL: the whole sound rises and falls once per bar (4/4 at 120 bpm: 2 s; 6/8: 1.5 s)
     {
+        const auto longChord = sawChord ({ 146.83f, 220.0f, 293.66f, 369.99f }, 14.0);
         HoistDSP::Params p; p.tide = 0.5f; p.dread = 0.0f;
-        auto out = runDsp (chord, p);
-        const float depth = spread (fold (out, (int) (2.0 * sr), 0.5));
-        check (depth > 4.0f, "TIDE swell: pumps on the beat (dB)", depth);
+        auto out = runDsp (longChord, p);
+        const float depth = spread (fold (out, (int) (2.0 * sr), 2.0));
+        check (depth > 3.0f, "TIDE swell: the bar breathes like a wave (dB)", depth);
         p.tsNum = 6; p.tsDen = 8;
-        auto out68 = runDsp (chord, p);
-        const float d68 = spread (fold (out68, (int) (2.0 * sr), 0.75));
-        const float ac75 = envAutocorr (out68, (int) (2.0 * sr), 0.75), ac50 = envAutocorr (out68, (int) (2.0 * sr), 0.5);
-        std::printf ("   (6/8 envelope autocorrelation: 0.75 s %.2f, 0.5 s %.2f)\n", ac75, ac50);
-        check (d68 > 4.0f && ac75 > ac50 + 0.3f, "TIDE swell in 6/8: pumps on the dotted beat (dB)", d68);
+        auto out68 = runDsp (longChord, p);
+        const float d68 = spread (fold (out68, (int) (2.0 * sr), 1.5));
+        const float ac15 = envAutocorr (out68, (int) (2.0 * sr), 1.5), ac10 = envAutocorr (out68, (int) (2.0 * sr), 1.0);
+        std::printf ("   (6/8 envelope autocorrelation: 1.5 s %.2f, 1.0 s %.2f)\n", ac15, ac10);
+        check (d68 > 3.0f && ac15 > ac10 + 0.3f, "TIDE swell in 6/8: one wave per 6/8 bar (dB)", d68);
     }
-    // 5. STORM: the filter wobbles
+    // 5. ROUGH SEA: gusts move the tone irregularly (no fixed rhythm)
     {
         HoistDSP::Params p; p.tide = 0.95f; p.dread = 0.0f;
         auto out = runDsp (chord, p);
         float lo = 1e9f, hi = 0.0f;
-        for (int s = (int) (2.0 * sr); s + 960 < (int) (6.0 * sr); s += 960) { const float c = centroid (out, s, 960); lo = juce::jmin (lo, c); hi = juce::jmax (hi, c); }
-        check (hi / lo > 2.0f, "TIDE storm: filter wobble (centroid max/min)", hi / lo);
+        for (int s = (int) (2.0 * sr); s + 960 < (int) (7.5 * sr); s += 960) { const float c = centroid (out, s, 960); lo = juce::jmin (lo, c); hi = juce::jmax (hi, c); }
+        check (hi / lo > 1.5f, "TIDE rough sea: gusts move the tone (centroid max/min)", hi / lo);
     }
     // 6. DREAD: brighter shimmer at the start, darker along the way
     {
         HoistDSP::Params p; p.tide = 0.0f;
         float c[3]; const float ds[3] = { 0.0f, 0.3f, 0.7f };
-        for (int k = 0; k < 3; ++k) { p.dread = ds[k]; auto out = runDsp (chord, p); c[k] = centroid (out, (int) (3.0 * sr), (int) (2.0 * sr)); }
-        std::printf ("   (centroid: fair %.0f Hz, grey %.0f Hz, deep %.0f Hz)\n", c[0], c[1], c[2]);
+        for (int k = 0; k < 3; ++k) { p.dread = ds[k]; auto out = runDsp (chord, p); c[k] = highShare (out, (int) (2.0 * sr), (int) (5.5 * sr)); }
+        std::printf ("   (energy above 2 kHz: fair %.4f, grey %.4f, deep %.4f)\n", c[0], c[1], c[2]);
         check (c[0] > c[1] && c[1] > c[2], "DREAD darkens the sound stage by stage", c[0] / c[2]);
         p.dread = 0.0f; auto fair = runDsp (sine (440.0f, 6.0), p);
         p.dread = 0.35f; auto grey = runDsp (sine (440.0f, 6.0), p);
         const int A = (int) (2 * sr), B = (int) (5 * sr);
         const float s0 = bandEnergy (fair, A, B, 880.0f, 30.0f) / bandEnergy (fair, A, B, 440.0f, 15.0f);
         const float s1 = bandEnergy (grey, A, B, 880.0f, 30.0f) / bandEnergy (grey, A, B, 440.0f, 15.0f);
-        check (s0 > 4.0f * s1 && s0 > 0.002f, "FAIR WINDS: octave shimmer (880 vs 440)", s0);
+        check (s0 > 4.0f * s1 && s0 > 0.002f, "FAIR WEATHER: octave sparkle (880 vs 440)", s0);
     }
     // 7. SOMETHING'S WRONG: the pitch drifts flat
     {
@@ -273,6 +288,15 @@ int main (int argc, char** argv)
         auto out = runDsp (sine (440.0f, 6.0), p);
         const float subR = bandEnergy (out, (int) (2 * sr), (int) (5 * sr), 220.0f, 15.0f) / juce::jmax (1.0e-9f, bandEnergy (out, (int) (2 * sr), (int) (5 * sr), 440.0f, 15.0f));
         check (subR > 0.05f, "THE DEEP: sub octave growl (220 vs 440)", subR);
+    }
+    // 8b. whispers in the deep (formant noise around 2 kHz, absent earlier)
+    {
+        HoistDSP::Params p; p.tide = 0.0f;
+        p.dread = 0.5f; auto calm = runDsp (sine (110.0f, 10.0), p);
+        p.dread = 0.85f; auto deepOut = runDsp (sine (110.0f, 10.0), p);
+        const int A = (int) (2 * sr), B = (int) (10 * sr) - 10;
+        const float w0 = bandEnergy (calm, A, B, 2100.0f, 150.0f), w1 = bandEnergy (deepOut, A, B, 2100.0f, 150.0f);
+        check (w1 > 10.0f * w0, "THE DEEP: whispers appear (2.1 kHz band, deep vs stage 3)", w1 / juce::jmax (1.0e-12f, w0));
     }
     // 9. ABYSS: almost nothing of the original left, but not silent
     {

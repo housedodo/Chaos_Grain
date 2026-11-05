@@ -3,22 +3,26 @@
 
 namespace
 {
+    // the game's own colours (HUD: cream ink, navy plaques, gold, brass, dark wood, oxblood title)
     namespace col
     {
-        const juce::Colour casing { 0xff8e9ea0 };   // weathered sea-grey
-        const juce::Colour caseDk { 0xff3f4a4c };
-        const juce::Colour panel  { 0xff7f8f91 };
-        const juce::Colour label  { 0xff1f2a2c };
-        const juce::Colour red    { 0xffc8323c };
-        const juce::Colour teal   { 0xff1f7a80 };
-        const juce::Colour brass  { 0xffc9a24a };
-        const juce::Colour knob   { 0xffdcd8cc };
-        const juce::Colour black  { 0xff121414 };
-        const juce::Colour lamp   { 0xffffc85a };
-        const juce::Colour lampOff{ 0xff3a3426 };
-        const juce::Colour led    { 0xff7dff4f };
-        const juce::Colour ledOff { 0xff2b4a22 };
-        const juce::Colour text   { 0xffe8f4f0 };
+        const juce::Colour wood    { 0xff3a2210 };
+        const juce::Colour woodDk  { 0xff2a1608 };
+        const juce::Colour woodHi  { 0xff5a3a1e };
+        const juce::Colour brass   { 0xffc9a85c };
+        const juce::Colour brassHi { 0xffead8a8 };
+        const juce::Colour brassDk { 0xff6a4a26 };
+        const juce::Colour gold    { 0xffffd23a };
+        const juce::Colour ink     { 0xfffff4d8 };
+        const juce::Colour navy    { 0xff17112e };
+        const juce::Colour navyEdge{ 0xff8a7f9c };
+        const juce::Colour oxblood { 0xff8a1a1a };
+        const juce::Colour parch   { 0xfff4ead0 };
+        const juce::Colour pink    { 0xffff70d0 };
+        const juce::Colour black   { 0xff0b0820 };
+        const juce::Colour caseDk  { 0xff1a0f08 };
+        const juce::Colour label   { 0xff2a1608 };
+        const juce::Colour knob    { 0xffe2cf9a };
     }
 
     juce::Colour shade (juce::Colour c, float f)
@@ -160,26 +164,124 @@ namespace
                 cx + std::cos (ang) * (r - 1), cy + std::sin (ang) * (r - 1), juce::Colours::white);
     }
 
-    struct KnobSpec { const char* id; const char* name; float cx, cy, r; juce::Colour cap; };
-    const KnobSpec knobs[3] = { { "tide", "TIDE", 24.0f, 132.0f, 9.0f, col::teal },
-                                { "dread", "DREAD", 64.0f, 133.0f, 15.0f, col::red },
-                                { "mix", "MIX", 104.0f, 132.0f, 9.0f, col::brass } };
-    const juce::Rectangle<int> anchorRect { 8, 7, 12, 8 };
-    constexpr int crtX = 6, crtY = 22, crtW = 116, crtH = 66;
-    constexpr int scrX = crtX + 5, scrY = crtY + 5, scrW = crtW - 10, scrH = crtH - 10;
 
-    // sky / sea colours along the DREAD journey (5 key frames)
-    juce::Colour along (const juce::Colour* k, float d)
+    const juce::Rectangle<int> anchorRect { 5, 4, 15, 14 };
+    constexpr int pcx = 64, pcy = 56, pR = 33, glassR = 28;          // the porthole
+    struct KnobSpec { const char* id; const char* name; float cx, cy, r; };
+    const KnobSpec knobs[3] = { { "tide", "TIDE", 23.0f, 137.0f, 12.0f },
+                                { "dread", "DREAD", 64.0f, 137.0f, 15.0f },
+                                { "mix", "MIX", 105.0f, 137.0f, 9.0f } };
+
+    // the game's five dread palettes (sky, sea, sun ...)
+    struct Pal { juce::Colour skyTop, skyHor, fog, deep, shallow, sun, cloud; float stars; };
+    const Pal pal[5] = {
+        { juce::Colour (0xff3a86e0), juce::Colour (0xffbfeaff), juce::Colour (0xffbfeaff), juce::Colour (0xff1b86c6), juce::Colour (0xff4fe0d0), juce::Colour (0xfffff2a8), juce::Colour (0xffffffff), 0.0f },
+        { juce::Colour (0xff5490d0), juce::Colour (0xffd6e8e0), juce::Colour (0xffd2e4dc), juce::Colour (0xff1d7a9e), juce::Colour (0xff58c4b8), juce::Colour (0xfffff6c8), juce::Colour (0xfff2f4f0), 0.0f },
+        { juce::Colour (0xff5a5f9c), juce::Colour (0xffc4d196), juce::Colour (0xffa9bb86), juce::Colour (0xff1c5a6c), juce::Colour (0xff3f8c78), juce::Colour (0xffe8ffb8), juce::Colour (0xffc9c8b8), 0.0f },
+        { juce::Colour (0xff24243e), juce::Colour (0xff6a7c76), juce::Colour (0xff4a5a58), juce::Colour (0xff0e2c3c), juce::Colour (0xff285856), juce::Colour (0xffd4dccf), juce::Colour (0xff59606a), 0.5f },
+        { juce::Colour (0xff06030e), juce::Colour (0xff5a1a50), juce::Colour (0xff2a1034), juce::Colour (0xff12123a), juce::Colour (0xff52287c), juce::Colour (0xff000000), juce::Colour (0xff2a1030), 1.0f } };
+    Pal palAt (float d)
     {
         const float x = juce::jlimit (0.0f, 1.0f, d) * 4.0f;
         const int i = juce::jmin (3, (int) x);
-        return mixc (k[i], k[i + 1], x - (float) i);
+        const float f = x - (float) i;
+        const auto& a = pal[i]; const auto& b = pal[i + 1];
+        return { mixc (a.skyTop, b.skyTop, f), mixc (a.skyHor, b.skyHor, f), mixc (a.fog, b.fog, f), mixc (a.deep, b.deep, f),
+                 mixc (a.shallow, b.shallow, f), mixc (a.sun, b.sun, f), mixc (a.cloud, b.cloud, f), a.stars + (b.stars - a.stars) * f };
     }
-    const juce::Colour skyTop[5]  = { juce::Colour (0xff2b1b5e), juce::Colour (0xff4a5260), juce::Colour (0xff2c3826), juce::Colour (0xff0b1028), juce::Colour (0xff030304) };
-    const juce::Colour skyLow[5]  = { juce::Colour (0xffff7a59), juce::Colour (0xff9aa0a6), juce::Colour (0xff6f7d4a), juce::Colour (0xff1f2a4a), juce::Colour (0xff0d0707) };
-    const juce::Colour seaTop[5]  = { juce::Colour (0xff1e8a9a), juce::Colour (0xff4f6e78), juce::Colour (0xff3a5144), juce::Colour (0xff0e1d33), juce::Colour (0xff050608) };
-    const juce::Colour seaLow[5]  = { juce::Colour (0xff0b3f5c), juce::Colour (0xff2a3c46), juce::Colour (0xff1c2a22), juce::Colour (0xff060c18), juce::Colour (0xff020203) };
-    const juce::Colour crest[5]   = { juce::Colour (0xffb8fff4), juce::Colour (0xffc9d3d6), juce::Colour (0xffa8b884), juce::Colour (0xff5d7aa8), juce::Colour (0xff2a1414) };
+    // lantern colour per stage (from each stage's palette)
+    const juce::Colour lanternLit[5] = { juce::Colour (0xffffd23a), juce::Colour (0xfffff2a8), juce::Colour (0xffc4d196),
+                                         juce::Colour (0xffbfe0e8), juce::Colour (0xffff70d0) };
+
+    void plaque (Canvas& c, int x, int y, int w, int h)
+    {
+        c.rect (x, y, w, h, col::navy);
+        for (int i = x; i < x + w; ++i) { c.px (i, y, col::navyEdge); c.px (i, y + h - 1, col::navyEdge); }
+        for (int j = y; j < y + h; ++j) { c.px (x, j, col::navyEdge); c.px (x + w - 1, j, col::navyEdge); }
+        c.px (x + 1, y + h, col::black); for (int i = x + 1; i <= x + w; ++i) c.px (i, y + h, juce::Colour (0x88000000));
+    }
+
+    void rivet (Canvas& c, int x, int y) { c.px (x, y, col::brassHi); c.px (x + 1, y, col::brass); c.px (x, y + 1, col::brass); c.px (x + 1, y + 1, col::brassDk); }
+
+    void anchorGlyph (Canvas& c, int x, int y, juce::Colour k)
+    {
+        c.rect (x + 4, y, 3, 1, k); c.px (x + 4, y + 1, k); c.px (x + 6, y + 1, k); c.rect (x + 4, y + 2, 3, 1, k);   // ring
+        c.rect (x + 5, y + 3, 1, 7, k);                                                                             // shank
+        c.rect (x + 2, y + 4, 7, 1, k);                                                                             // stock
+        c.px (x + 1, y + 7, k); c.px (x + 1, y + 8, k); c.px (x + 2, y + 9, k); c.px (x + 3, y + 10, k); c.px (x + 4, y + 10, k);
+        c.px (x + 9, y + 7, k); c.px (x + 9, y + 8, k); c.px (x + 8, y + 9, k); c.px (x + 7, y + 10, k); c.px (x + 6, y + 10, k);
+        c.px (x, y + 7, k); c.px (x + 10, y + 7, k);                                                                // flukes
+    }
+
+    void lantern (Canvas& c, int x, int y, juce::Colour glow, float lit)
+    {
+        c.rect (x + 1, y, 3, 1, col::brassDk); c.px (x + 2, y - 1, col::brassDk);              // handle / cap
+        c.rect (x, y + 1, 5, 1, col::brass);
+        const auto glass = mixc (juce::Colour (0xff2a2018), glow, lit);
+        c.rect (x, y + 2, 5, 5, col::brassDk);
+        c.rect (x + 1, y + 2, 3, 5, glass);
+        if (lit > 0.5f) c.px (x + 2, y + 4, glow.brighter (0.6f));
+        c.rect (x, y + 7, 5, 1, col::brass);
+        if (lit > 0.3f)                                                                          // halo on the wood
+            for (int dy = -2; dy <= 9; ++dy)
+                for (int dx = -3; dx <= 7; ++dx)
+                    if ((dx < 0 || dx > 4 || dy < 0 || dy > 7) && retro::bayer4 (x + dx, y + dy) < 0.18f * lit)
+                        c.px (x + dx, y + dy, mixc (col::wood, glow, 0.35f));
+    }
+
+    // TIDE: a little ship's wheel
+    void helm (Canvas& c, float cx, float cy, float r, float value)
+    {
+        const float rot = value * juce::MathConstants<float>::twoPi * 0.75f;
+        const juce::Colour rimDk (0xff6a4422), rimLt (0xffb07a44), spoke (0xffc89058);
+        for (float a = 0.0f; a < juce::MathConstants<float>::twoPi; a += 0.04f)                  // rim
+            for (float rr = r - 2.0f; rr <= r; rr += 0.5f)
+                c.px (cx + std::cos (a) * rr, cy + std::sin (a) * rr, std::sin (a - 2.3f) > 0.2f ? rimLt : rimDk);
+        for (int k = 0; k < 8; ++k)                                                              // spokes + handles
+        {
+            const float a = rot + (float) k * juce::MathConstants<float>::pi / 4.0f;
+            c.line (cx + std::cos (a) * 3.0f, cy + std::sin (a) * 3.0f, cx + std::cos (a) * (r + 2.0f), cy + std::sin (a) * (r + 2.0f), spoke);
+            const float hx = cx + std::cos (a) * (r + 3.0f), hy = cy + std::sin (a) * (r + 3.0f);
+            c.px (hx, hy, k == 0 ? col::gold : spoke);
+            c.px (hx + 1, hy, k == 0 ? col::gold : rimDk);
+        }
+        for (int dy = -3; dy <= 3; ++dy)                                                         // brass hub
+            for (int dx = -3; dx <= 3; ++dx)
+                if (dx * dx + dy * dy <= 9) c.px ((int) cx + dx, (int) cy + dy, dx + dy < 0 ? col::brassHi : col::brass);
+        c.px ((int) cx, (int) cy, col::brassDk);
+    }
+
+    // DREAD: a brass barometer with the five stages on its face
+    void barometer (Canvas& c, float cx, float cy, float r, float value)
+    {
+        for (int dy = -(int) r - 2; dy <= (int) r + 2; ++dy)
+            for (int dx = -(int) r - 2; dx <= (int) r + 2; ++dx)
+            {
+                const float d = std::sqrt ((float) (dx * dx + dy * dy));
+                if (d > r + 2.0f) continue;
+                juce::Colour k = d > r ? (dx + dy < 0 ? col::brassHi : col::brassDk) : d > r - 2.0f ? col::brass : col::parch;
+                if (d <= r - 2.0f && retro::bayer4 ((int) cx + dx, (int) cy + dy) < 0.12f) k = shade (col::parch, 0.92f);
+                c.px ((int) cx + dx, (int) cy + dy, k);
+            }
+        const float a0 = juce::degreesToRadians (135.0f), span = juce::degreesToRadians (270.0f);
+        for (int s = 0; s < 5; ++s)                                                              // coloured stage arc
+            for (float f = 0.0f; f < 1.0f; f += 0.08f)
+            {
+                const float a = a0 + span * ((float) s + f) / 5.0f;
+                for (float rr = r - 5.0f; rr <= r - 3.0f; rr += 1.0f)
+                    c.px (cx + std::cos (a) * rr, cy + std::sin (a) * rr, s == 4 ? col::pink.darker (0.2f) : mixc (lanternLit[s], col::brassDk, 0.25f));
+            }
+        for (int s = 0; s <= 5; ++s)                                                             // ticks
+        {
+            const float a = a0 + span * (float) s / 5.0f;
+            c.line (cx + std::cos (a) * (r - 6.0f), cy + std::sin (a) * (r - 6.0f), cx + std::cos (a) * (r - 8.0f), cy + std::sin (a) * (r - 8.0f), col::label);
+        }
+        const float a = a0 + span * value;                                                       // needle
+        c.line (cx, cy, cx + std::cos (a) * (r - 4.0f), cy + std::sin (a) * (r - 4.0f), col::oxblood);
+        c.line (cx + 1, cy, cx + 1 + std::cos (a) * (r - 6.0f), cy + std::sin (a) * (r - 6.0f), col::oxblood);
+        c.rect ((int) cx - 1, (int) cy - 1, 3, 3, col::brassDk);
+        c.px ((int) cx, (int) cy, col::brassHi);
+    }
 }
 
 HoistEditor::HoistEditor (HoistProcessor& p) : AudioProcessorEditor (p), proc (p)
@@ -201,7 +303,7 @@ void HoistEditor::setScale (int s)
 
 void HoistEditor::paint (juce::Graphics& g)
 {
-    g.fillAll (juce::Colour (0xff141618));
+    g.fillAll (col::black);
     juce::Image img (juce::Image::ARGB, lowW, lowH, true);
     render (img);
     retro::blitLowRes (g, img, 0, 0, scale);
@@ -215,158 +317,198 @@ void HoistEditor::render (juce::Image& img)
     auto get = [this] (const char* id) { return proc.apvts.getRawParameterValue (id)->load(); };
     const float tide = get ("tide"), dread = get ("dread");
     const bool anchored = get ("anchor") > 0.5f;
-    const float sway = proc.dsp.uiSway.load(), pump = proc.dsp.uiPump.load(), wobble = proc.dsp.uiWobble.load();
+    const float sway = proc.dsp.uiSway.load(), lift = proc.dsp.uiPump.load(), gust = proc.dsp.uiGust.load();
     const float level = proc.dsp.uiLevel.load();
+    const float rough = juce::jlimit (0.0f, 1.0f, (tide - 0.6f) / 0.2f);
 
-    // --- casing ---
-    c.bevel (0, 0, (float) lowW, (float) lowH, col::casing, 5, true, 2);
-    for (int j = 4; j < lowH - 4; ++j)
-        for (int i = 4; i < lowW - 4; ++i)
-            if ((float) j / (float) lowH > 0.55f + retro::bayer4 (i, j) * 0.6f) c.px (i, j, shade (col::casing, 0.94f));
-
-    // --- ANCHOR button + LED + title ---
-    c.bevel ((float) anchorRect.getX(), (float) anchorRect.getY(), 12, 8, shade (col::casing, 0.75f), 1, false);
-    c.bevel ((float) anchorRect.getX() + 2, (float) anchorRect.getY() + (anchored ? 3 : 2), 8, 4,
-             anchored ? shade (col::brass, 1.25f) : col::brass, 0, ! anchored);
-    c.rect (23, 9, 5, 4, col::black);
-    c.rect (24, 10, 3, 2, level > 0.01f ? col::led : col::ledOff);
-    c.small ("ANCHOR", 14, 17, col::label, true);
-    c.text ("HOIST", 96, 6, col::label, true);
-    c.small ("TIDE + DREAD", 96, 15, col::caseDk, true);
-
-    // --- screen: the sea ---
-    c.bevel (crtX, crtY, crtW, crtH, juce::Colour (0xff6d7a7c), 4, false, 2);
-    c.chamfer (scrX - 1, scrY - 1, scrW + 2, scrH + 2, 4, col::black);
-    const int horizon = scrY + 26, footY = scrY + scrH - 8;
-    const float storm = juce::jlimit (0.0f, 1.0f, (tide - 0.6f) / 0.3f);
-    const bool flash = storm > 0.3f && wobble > 0.92f && std::fmod (t * 7.0f, 1.0f) < 0.25f;
-    for (int j = scrY; j < horizon; ++j)
+    // --- dark wood planks + brass frame ---
+    for (int j = 0; j < lowH; ++j)
     {
-        const float f = (float) (j - scrY) / (float) (horizon - scrY);
-        for (int i = scrX; i < scrX + scrW; ++i)
+        const int plank = j / 9;
+        const float tone = 0.9f + 0.12f * (float) ((plank * 7) % 3) / 2.0f;
+        for (int i = 0; i < lowW; ++i)
         {
-            auto colr = mixc (along (skyTop, dread), along (skyLow, dread), f + (retro::bayer4 (i, j) - 0.5f) * 0.25f);
-            if (flash) colr = colr.brighter (0.8f);
-            c.px (i, j, retro::to15bit (colr));
+            auto k = shade (col::wood, tone);
+            if (j % 9 == 0) k = col::woodDk;
+            else if (((i + plank * 37) % 61) == 0) k = col::woodDk;                       // butt joints
+            else if (retro::bayer4 (i * 3 + plank, j) < 0.1f) k = shade (col::wood, tone * 0.85f);   // grain
+            c.px (i, j, k);
         }
     }
-    // synthwave sun sinking with DREAD
-    if (dread < 0.45f)
-    {
-        const float sunY = (float) horizon - 9.0f + dread * 30.0f, cx = scrX + scrW * 0.5f;
-        for (int dy = -9; dy <= 0; ++dy)
-            for (int dx = -9; dx <= 9; ++dx)
+    for (int i = 0; i < lowW; ++i) { c.px (i, 0, col::brassDk); c.px (i, 1, col::brass); c.px (i, lowH - 2, col::brass); c.px (i, lowH - 1, col::brassDk); }
+    for (int j = 0; j < lowH; ++j) { c.px (0, j, col::brassDk); c.px (1, j, col::brass); c.px (lowW - 2, j, col::brass); c.px (lowW - 1, j, col::brassDk); }
+    for (auto pt : { juce::Point<int> (3, 3), { lowW - 5, 3 }, { 3, lowH - 5 }, { lowW - 5, lowH - 5 }, { 3, 90 }, { lowW - 5, 90 } })
+        rivet (c, pt.x, pt.y);
+
+    // --- title plaque + anchor + lantern (activity) ---
+    plaque (c, 34, 4, 60, 13);
+    c.rect (35, 5, 58, 11, juce::Colour (0xff5a1414));        // the game's title colours: cream on oxblood
+    c.text ("HOIST", 64, 7, col::ink, true);
+    plaque (c, anchorRect.getX(), anchorRect.getY(), anchorRect.getWidth(), anchorRect.getHeight());
+    anchorGlyph (c, anchorRect.getX() + 2, anchorRect.getY() + 1, anchored ? col::gold : col::brass.darker (0.3f));
+    lantern (c, lowW - 15, 6, col::gold, juce::jlimit (0.0f, 1.0f, level * 8.0f));
+
+    // --- the porthole ---
+    const Pal P = palAt (dread);
+    const int horizon = pcy - 3;
+    const bool rain = rough > 0.2f;
+    auto inGlass = [] (int x, int y) { const int dx = x - pcx, dy = y - pcy; return dx * dx + dy * dy <= glassR * glassR; };
+    for (int y = pcy - glassR; y <= pcy + glassR; ++y)
+        for (int x = pcx - glassR; x <= pcx + glassR; ++x)
+        {
+            if (! inGlass (x, y)) continue;
+            juce::Colour k;
+            if (y < horizon)
             {
-                const int y = (int) sunY + dy;
-                if (y >= horizon || dx * dx + dy * dy > 81) continue;
-                if (dy > -5 && ((-dy) % 2 == 0)) continue;   // stripes
-                c.px ((int) cx + dx, y, mixc (juce::Colour (0xffffe066), juce::Colour (0xffff4f8a), (float) (dy + 9) / 9.0f));
+                const float f = (float) (y - (pcy - glassR)) / (float) (horizon - (pcy - glassR));
+                k = mixc (P.skyTop, P.skyHor, f + (retro::bayer4 (x, y) - 0.5f) * 0.25f);
+                if (f > 0.75f && retro::bayer4 (x + (int) (t * 2.0f), y) < (f - 0.75f) * 2.0f) k = mixc (k, P.fog, 0.6f);   // haze
+            }
+            else
+            {
+                const float f = (float) (y - horizon) / (float) (pcy + glassR - horizon);
+                k = mixc (P.shallow, P.deep, 0.35f + 0.65f * f + (retro::bayer4 (x, y) - 0.5f) * 0.25f);
+            }
+            c.px (x, y, retro::to15bit (k));
+        }
+    // stars
+    if (P.stars > 0.0f)
+        for (int s = 0; s < 18; ++s)
+        {
+            const int sx = pcx - 24 + (s * 37) % 48, sy = pcy - 25 + (s * 23) % 20;
+            if (sy < horizon - 2 && inGlass (sx, sy) && (float) ((s * 13) % 10) / 10.0f < P.stars && std::fmod (t + (float) s * 0.37f, 3.0f) > 0.3f)
+                c.px (sx, sy, juce::Colour (0xffe8e0ff));
+        }
+    // sun (sinking with dread) - black with a pink corona in the abyss
+    {
+        const float sunY = (float) pcy - 18.0f + dread * 10.0f, sunX = (float) pcx + 9.0f;
+        const float sr = 4.0f + dread * 2.0f;
+        for (int dy = -8; dy <= 8; ++dy)
+            for (int dx = -8; dx <= 8; ++dx)
+            {
+                const float dd = std::sqrt ((float) (dx * dx + dy * dy));
+                const int x = (int) sunX + dx, y = (int) sunY + dy;
+                if (y >= horizon || ! inGlass (x, y)) continue;
+                if (dd <= sr) c.px (x, y, P.sun);
+                else if (dread > 0.8f && dd <= sr + 1.5f) c.px (x, y, col::pink);
             }
     }
-    // fog in the middle of the journey
-    if (dread > 0.35f && dread < 0.8f)
+    // clouds drifting
+    for (int k = 0; k < 3; ++k)
     {
-        const float fog = 1.0f - std::abs (dread - 0.55f) / 0.22f;
-        for (int j = scrY + 8; j < horizon + 4; ++j)
-            for (int i = scrX; i < scrX + scrW; ++i)
-                if (retro::bayer4 (i + (int) (t * 3.0f), j) < fog * 0.45f) c.px (i, j, juce::Colour (0xff9fae8a));
+        const int cx0 = pcx - 30 + (int) std::fmod (t * (1.5f + (float) k) + (float) k * 23.0f, 70.0f), cy0 = pcy - 22 + k * 5;
+        for (int dx = 0; dx < 9 - k; ++dx)
+            for (int dy = 0; dy < 2; ++dy)
+                if (inGlass (cx0 + dx, cy0 + dy) && cy0 + dy < horizon && ! (dy == 0 && (dx == 0 || dx == 8 - k))) c.px (cx0 + dx, cy0 + dy, P.cloud);
     }
-    // moon at night
-    if (dread > 0.6f && dread < 0.9f)
-        for (int dy = -3; dy <= 3; ++dy)
-            for (int dx = -3; dx <= 3; ++dx)
-                if (dx * dx + dy * dy <= 9 && (dx + 1) * (dx + 1) + dy * dy > 5) c.px (scrX + scrW - 16 + dx, scrY + 8 + dy, juce::Colour (0xffd8e0f0));
-    // lightning bolt in the storm
-    if (flash)
+    // waves (calm ripples .. swell .. rough white caps)
+    const float amp = 0.4f + 1.6f * juce::jmin (1.0f, tide * 1.5f) + 1.6f * rough;
+    for (int row = 0; row < 5; ++row)
     {
-        float x = scrX + 20.0f + std::fmod (t * 37.0f, 60.0f);
-        for (int y = scrY + 1; y < horizon; y += 3) { const float nx = x + (std::fmod ((float) y * 7.3f, 5.0f) - 2.5f); c.line (x, (float) y, nx, (float) y + 3, juce::Colours::white); x = nx; }
-    }
-
-    // sea + waves
-    const float amp = 0.6f + 2.6f * juce::jmin (1.0f, tide * 1.6f) + 1.5f * storm;
-    for (int j = horizon; j < footY; ++j)
-    {
-        const float f = (float) (j - horizon) / (float) (footY - horizon);
-        for (int i = scrX; i < scrX + scrW; ++i)
-            c.px (i, j, retro::to15bit (mixc (along (seaTop, dread), along (seaLow, dread), f + (retro::bayer4 (i, j) - 0.5f) * 0.2f)));
-    }
-    for (int row = 0; row < 4; ++row)
-    {
-        const float y0 = (float) horizon + 2.0f + (float) row * 6.0f;
-        const float a = amp * (0.4f + 0.2f * (float) row);
-        const float speed = 1.2f + 2.5f * storm;
-        for (int i = scrX; i < scrX + scrW; ++i)
+        const float y0 = (float) horizon + 2.0f + (float) row * 5.0f;
+        for (int x = pcx - glassR; x <= pcx + glassR; ++x)
         {
-            const float ph = (float) i * (0.18f + 0.04f * (float) row) - t * speed * (1.0f + 0.3f * (float) row) + sway * 1.5f;
-            float y = y0 + a * std::sin (ph);
-            if (storm > 0.0f) y += storm * 1.2f * std::sin ((float) i * 0.9f + t * 9.0f);
-            if ((int) y < footY && (int) y > horizon) c.px (i, (int) y, along (crest, dread));
+            const float ph = (float) x * (0.22f + 0.05f * (float) row) - t * (1.0f + 0.4f * (float) row) * (1.0f + 1.5f * rough) + sway;
+            float y = y0 + amp * (0.4f + 0.15f * (float) row) * std::sin (ph) + rough * gust * std::sin ((float) x * 0.8f + t * 7.0f);
+            const int yi = (int) y;
+            if (yi > horizon && inGlass (x, yi)) c.px (x, yi, mixc (P.shallow, juce::Colours::white, 0.45f - 0.2f * dread));
+            if (rough > 0.4f && std::sin (ph) > 0.92f && inGlass (x, yi - 1)) c.px (x, yi - 1, juce::Colour (0xfff0f8ff));   // white caps
         }
     }
-    // eyes in the abyss
-    if (dread > 0.88f && std::fmod (t, 4.0f) < 3.6f)
+    // eyes below the surface in the abyss
+    if (dread > 0.82f && std::fmod (t, 5.0f) < 4.4f)
     {
-        const juce::Colour eye (0xffff2a2a);
-        c.rect (scrX + 22, horizon + 14, 2, 1, eye); c.rect (scrX + 27, horizon + 14, 2, 1, eye);
+        const int ey = horizon + 16;
+        c.rect (pcx - 14, ey, 2, 1, col::pink); c.rect (pcx - 9, ey, 2, 1, col::pink);
+        c.rect (pcx + 13, ey + 5, 1, 1, col::pink); c.rect (pcx + 17, ey + 5, 1, 1, col::pink);
     }
-
-    // the boat
+    // the Merry Gull
     {
-        const float bob = (anchored ? 0.3f : 1.0f) * (sway * amp * 0.7f) - (1.0f - pump) * 3.0f;
-        const float bx = scrX + scrW * 0.5f, by = (float) horizon + 3.0f + bob;
-        const float tilt = (anchored ? 0.3f : 1.0f) * sway * 2.0f;
-        const juce::Colour hull = mixc (juce::Colour (0xff7a4a2a), juce::Colour (0xff201410), dread);
-        c.poly ({ { bx - 10, by - 1 + tilt }, { bx + 10, by - 1 - tilt }, { bx + 7, by + 3 - tilt }, { bx - 7, by + 3 + tilt } }, hull);
-        c.line (bx, by - 1, bx, by - 15, juce::Colour (0xff3a2a1a));
-        const juce::Colour sail = mixc (juce::Colour (0xfff4efe0), juce::Colour (0xff30302c), juce::jlimit (0.0f, 1.0f, (dread - 0.3f) * 1.4f));
-        const float billow = 2.0f + 2.0f * sway + 2.0f * storm * std::sin (t * 8.0f);
-        c.poly ({ { bx + 1, by - 14 }, { bx + 1, by - 3 }, { bx + 8 + billow, by - 4 } }, sail);
-        if (dread > 0.55f) for (int k = 0; k < 3; ++k) c.px ((int) (bx + 4 + k * 2), (int) (by - 6 - k), col::black);   // tattered
+        const float rock = anchored ? 0.3f : 1.0f;
+        const float bob = rock * sway * amp * 0.8f - (lift - 0.75f) * 6.0f;
+        const float bx = (float) pcx - 6.0f, by = (float) horizon + 5.0f + bob;
+        const float tilt = rock * sway * 1.8f;
+        const juce::Colour hull = mixc (juce::Colour (0xff8a5a30), juce::Colour (0xff2a1608), dread * 0.8f);
+        c.poly ({ { bx - 9, by - 2 + tilt }, { bx + 10, by - 2 - tilt }, { bx + 7, by + 2 - tilt }, { bx - 7, by + 2 + tilt } }, hull);
+        c.line (bx - 8, by - 2 + tilt, bx + 9, by - 2 - tilt, mixc (juce::Colour (0xffc8a070), hull, 0.5f));
+        c.line (bx + 1, by - 2, bx + 1, by - 17, juce::Colour (0xff3a2210));
+        const juce::Colour sail = mixc (col::parch, juce::Colour (0xff3a3048), juce::jlimit (0.0f, 1.0f, (dread - 0.3f) * 1.3f));
+        const float billow = 1.5f + 1.5f * sway + 2.0f * rough * gust;
+        c.poly ({ { bx + 2, by - 16 }, { bx + 2, by - 4 }, { bx + 9 + billow, by - 5 } }, sail);
+        c.poly ({ { bx, by - 14 }, { bx, by - 5 }, { bx - 6 - billow * 0.5f, by - 5 } }, shade (sail, 0.9f));
+        c.px ((int) bx + 4, (int) by - 9, shade (sail, 0.75f)); c.px ((int) bx + 5, (int) by - 8, shade (sail, 0.75f));   // patches
+        const float flap = std::sin (t * (4.0f + 6.0f * rough)) > 0.0f ? 1.0f : 0.0f;
+        c.rect ((int) bx + 2, (int) by - 18, 3, 1, juce::Colour (0xffc8402a)); c.px ((int) bx + 5, (int) (by - 18 + flap), juce::Colour (0xffc8402a));   // pennant
         if (anchored)
         {
             const int ax = (int) bx - 6;
-            c.line ((float) ax, by + 2, (float) ax, (float) footY - 4, juce::Colour (0xffb0b0a8));
-            c.rect (ax - 2, footY - 4, 5, 1, juce::Colour (0xffd0d0c8));
-            c.px (ax - 2, footY - 5, juce::Colour (0xffd0d0c8)); c.px (ax + 2, footY - 5, juce::Colour (0xffd0d0c8));
+            for (int y = (int) by + 2; y < pcy + glassR - 5; ++y) if (inGlass (ax, y) && (y % 2 == 0)) c.px (ax, y, juce::Colour (0xffb0a890));
+            anchorGlyph (c, ax - 5, pcy + glassR - 13, juce::Colour (0xffb0a890));
         }
     }
+    // rain in rough weather
+    if (rain)
+        for (int k = 0; k < (int) (30.0f * rough); ++k)
+        {
+            const int rx = pcx - glassR + (int) std::fmod ((float) k * 17.3f + t * 40.0f, (float) (2 * glassR));
+            const int ry = pcy - glassR + (int) std::fmod ((float) k * 29.1f + t * 90.0f, (float) (2 * glassR));
+            for (int s = 0; s < 3; ++s) if (inGlass (rx - s, ry + s)) c.px (rx - s, ry + s, juce::Colour (0xffd8e8f0));
+        }
+    // glass glare + brass ring with bolts
+    for (int a = 0; a < 14; ++a)
+    {
+        const float ang = 3.6f + (float) a * 0.06f;
+        c.px ((float) pcx + std::cos (ang) * (float) (glassR - 4), (float) pcy + std::sin (ang) * (float) (glassR - 4), juce::Colour (0x66ffffff));
+    }
+    for (int y = pcy - pR - 1; y <= pcy + pR + 1; ++y)
+        for (int x = pcx - pR - 1; x <= pcx + pR + 1; ++x)
+        {
+            const int dx = x - pcx, dy = y - pcy;
+            const float d = std::sqrt ((float) (dx * dx + dy * dy));
+            if (d > (float) glassR && d <= (float) pR + 0.5f)
+            {
+                const float light = (float) (-dx - dy) / (float) pR;
+                c.px (x, y, d > (float) pR - 0.7f || d < (float) glassR + 1.0f ? col::brassDk : light > 0.25f ? col::brassHi : light < -0.35f ? shade (col::brass, 0.7f) : col::brass);
+            }
+            else if (d > (float) pR + 0.5f && d <= (float) pR + 1.5f) c.px (x, y, col::caseDk);
+        }
+    for (int b = 0; b < 8; ++b)
+    {
+        const float ang = (float) b * juce::MathConstants<float>::pi / 4.0f + 0.39f;
+        rivet (c, pcx + (int) std::lround (std::cos (ang) * 30.5f), pcy + (int) std::lround (std::sin (ang) * 30.5f));
+    }
 
-    // footer: stage + tide, or a knob read-out
-    c.rect (scrX, footY, scrW, 8, juce::Colour (0xff081010));
+    // --- read-out plaque (like the game's HUD) ---
+    plaque (c, 8, 92, 112, 10);
     juce::String left, right;
     const int stage = juce::jlimit (0, 4, (int) std::floor (dread * 4.999f));
     if (touched >= 0 && nowMs - touchedMs < 1500.0)
         left = juce::String (knobs[touched].name) + " " + juce::String (juce::roundToInt (get (knobs[touched].id) * 100.0f)) + "%";
     else left = HoistProcessor::stageNames()[stage];
     if (anchored) right = std::fmod (nowMs, 1000.0) < 650.0 ? "ANCHORED" : "";
-    else right = tide < 0.3f ? "CALM" : tide < 0.6f ? "SWELL" : tide < 0.85f ? "CHOPPY" : "STORM";
-    c.small (left, (float) scrX + 2, footY + 2, juce::Colour (0xff9fe8dc));
-    c.small (right, (float) (scrX + scrW - 2 - right.length() * 4), footY + 2, anchored ? col::lamp : juce::Colour (0xffd8f8f0));
-    if (proc.uiTsDen.load() == 8) c.small (juce::String (proc.uiTsNum.load()) + "/8", (float) scrX + 2, scrY + 2, juce::Colour (0xffd8f8f0));
+    else right = tide < 0.25f ? "CALM" : tide < 0.6f ? "SWELL" : "ROUGH SEA";
+    c.small (left, 11.0f, 95, col::ink);
+    c.small (right, (float) (117 - right.length() * 4), 95, col::gold);
+    if (proc.uiTsDen.load() == 8) c.small (juce::String (proc.uiTsNum.load()) + "/8", (float) (pcx - 3), pcy + glassR - 7, col::ink);
 
-    // --- DREAD stage lamps (the five stages) ---
-    c.bevel (6, 91, 116, 21, col::panel, 2, false);
-    c.small ("DREAD", 20, 99, col::label, true);
+    // --- five ship's lanterns: the DREAD stages ---
+    c.small ("DREAD", 9.0f, 108, col::brassHi);
     for (int k = 0; k < 5; ++k)
     {
-        const float w = juce::jlimit (0.0f, 1.0f, dread * 4.0f - (float) k + 1.0f);
-        const int x = 38 + k * 16;
-        c.rect (x - 1, 96, 7, 6, col::black);
-        c.rect (x, 97, 5, 4, mixc (col::lampOff, k == 4 ? col::red : col::lamp, w));
-        c.small (juce::String (k + 1), (float) x + 1, 104, col::label);
+        const float lit = juce::jlimit (0.0f, 1.0f, dread * 4.0f - (float) k + 1.0f);
+        lantern (c, 36 + k * 17, 104, lanternLit[k], lit * (k == stage ? 1.0f : 0.75f));
     }
 
-    // --- knobs ---
-    c.bevel (6, 114, 116, 50, col::panel, 3, false);
+    // --- controls: helm (TIDE), barometer (DREAD), brass knob (MIX) ---
+    helm (c, knobs[0].cx, knobs[0].cy, knobs[0].r, tide);
+    barometer (c, knobs[1].cx, knobs[1].cy, knobs[1].r, dread);
+    drawKnob (c, knobs[2].cx, knobs[2].cy, knobs[2].r, col::brass, get ("mix"));
     for (int k = 0; k < 3; ++k)
     {
-        const auto& ks = knobs[k];
-        drawKnob (c, ks.cx, ks.cy, ks.r, ks.cap, get (ks.id));
-        c.text (ks.name, ks.cx, (int) (ks.cy + ks.r + (k == 1 ? 5 : 6)), col::label, true);
+        const int w = (int) std::strlen (knobs[k].name) * 4 + 5;
+        plaque (c, (int) knobs[k].cx - w / 2, 156, w, 9);
+        c.small (knobs[k].name, knobs[k].cx, 158, col::ink, true);
     }
-    for (auto pt : { juce::Point<int> (3, 3), { lowW - 4, 3 }, { 3, lowH - 4 }, { lowW - 4, lowH - 4 } })
-        c.rect (pt.x - 1, pt.y - 1, 3, 3, col::caseDk);
 }
 
 int HoistEditor::knobAt (juce::Point<int> p) const
@@ -385,7 +527,7 @@ void HoistEditor::mouseDown (const juce::MouseEvent& e)
     {
         juce::PopupMenu m;
         const bool anch = proc.apvts.getRawParameterValue ("anchor")->load() > 0.5f;
-        m.addItem ("Anchor (hold)", true, anch, [this, anch] { proc.apvts.getParameter ("anchor")->setValueNotifyingHost (anch ? 0.0f : 1.0f); });
+        m.addItem ("Drop anchor (hold)", true, anch, [this, anch] { proc.apvts.getParameter ("anchor")->setValueNotifyingHost (anch ? 0.0f : 1.0f); });
         m.addSeparator();
         m.addItem ("Large UI", true, scale == 4, [this] { setScale (4); });
         m.addItem ("Small UI", true, scale == 3, [this] { setScale (3); });
@@ -403,7 +545,8 @@ void HoistEditor::mouseDown (const juce::MouseEvent& e)
         touched = dragKnob; touchedMs = juce::Time::getMillisecondCounterHiRes();
         return;
     }
-    if (anchorRect.expanded (2).contains (p) || juce::Rectangle<int> (scrX, scrY, scrW, scrH).contains (p))
+    const int dx = p.x - pcx, dy = p.y - pcy;
+    if (anchorRect.expanded (2).contains (p) || dx * dx + dy * dy <= pR * pR)
     {
         auto* a = proc.apvts.getParameter ("anchor");
         a->setValueNotifyingHost (a->getValue() > 0.5f ? 0.0f : 1.0f);
