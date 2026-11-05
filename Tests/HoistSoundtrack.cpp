@@ -715,6 +715,129 @@ static int renderGameAmb (const juce::File& dir)
     return 0;
 }
 
+// ------------------------------------------------------------------ harbour and tavern tunes (F minor, 99 BPM, 16 bars)
+// Two original pieces from the same instruments, through HOIST at its fair-weather setting, so they sit with the stage
+// loops (same tempo and key, 16 bars = four of the stage loops, so the game can start them together and cross-fade on the beat).
+namespace
+{
+    void clap (Buf& b, double t0, float gain, float pan)
+    {
+        for (int burst = 0; burst < 3; ++burst)   // a hand clap: three quick noise bursts through a band-pass
+        {
+            float s1 = 0, s2 = 0;
+            const float w = twoPi * 1300.0f / (float) sr, al = std::sin (w) / 3.0f;
+            for (int i = 0; i < (int) ((burst == 2 ? 0.09 : 0.012) * sr); ++i)
+            {
+                const float tt = (float) (i / sr), x = rnd.nextFloat() * 2 - 1;
+                const float y = (al * x + 2 * std::cos (w) * s1 - (1 - al) * s2) / (1 + al); s2 = s1; s1 = y;
+                addMono (b, t0 + burst * 0.011 + tt, gain * y * 3.0f * std::exp (-tt / (burst == 2 ? 0.03f : 0.004f)), pan);
+            }
+        }
+    }
+    struct Tune { const char* name; std::vector<Chord> chords; std::vector<std::array<int, 8>> mel; };
+    const Tune harbourTune { "music_harbour",
+        { { 44, 1 }, { 37, 1 }, { 39, 1 }, { 44, 1 }, { 41, 0 }, { 37, 1 }, { 39, 1 }, { 44, 1 } },   // Ab Db Eb Ab | Fm Db Eb Ab
+        { { 75, 0, 72, 0, 68, 0, 72, 75 }, { 77, 0, 0, 75, 73, 0, 72, 0 }, { 70, 0, 75, 0, 79, 0, 77, 75 }, { 72, 0, 0, 0, 68, 0, 0, 0 },
+          { 72, 0, 68, 0, 65, 0, 68, 72 }, { 73, 0, 77, 0, 80, 0, 77, 0 }, { 79, 0, 77, 75, 70, 0, 67, 0 }, { 68, 0, 0, 0, 0, 0, 0, -1 } } };
+    const Tune tavernTune { "music_tavern",
+        { { 41, 0 }, { 41, 0 }, { 39, 1 }, { 39, 1 }, { 37, 1 }, { 37, 1 }, { 36, 1 }, { 36, 1 },     // Fm Fm Eb Eb Db Db C C
+          { 44, 1 }, { 39, 1 }, { 41, 0 }, { 36, 1 }, { 44, 1 }, { 39, 1 }, { 41, 0 }, { 36, 1 } },   // Ab Eb Fm C x2
+        { { 77, 0, 75, 77, 79, 0, 80, 0 }, { 79, 77, 75, 0, 72, 0, 0, 0 }, { 75, 0, 79, 75, 70, 0, 75, 0 }, { 77, 75, 73, 0, 70, 0, 0, 0 },
+          { 73, 0, 77, 73, 68, 0, 73, 0 }, { 75, 73, 72, 0, 68, 0, 0, 0 }, { 72, 0, 76, 79, 76, 0, 72, 0 }, { 70, 0, 67, 0, 64, 0, 72, 0 },
+          { 80, 0, 79, 80, 75, 0, 72, 0 }, { 79, 0, 77, 75, 70, 0, 67, 0 }, { 68, 0, 72, 77, 80, 0, 77, 0 }, { 79, 0, 76, 0, 72, 0, 0, 0 },
+          { 80, 0, 79, 80, 75, 0, 72, 0 }, { 70, 0, 75, 79, 77, 75, 73, 0 }, { 72, 0, 77, 0, 75, 0, 72, 0 }, { 76, 0, 0, 0, 72, 0, 67, 0 } } };
+
+    // one 16-bar pass of a tune at t0 (tracks: pluck, bass, squeeze, drums, bell)
+    void playTune (std::array<Buf, numTracks>& tr, const Tune& T, bool tavern, double t0)
+    {
+        const double e = beat / 2.0;
+        auto inOct = [] (int m, int lo) { while (m >= lo + 12) m -= 12; while (m < lo) m += 12; return m; };
+        for (int b = 0; b < 16; ++b)
+        {
+            const Chord c = T.chords[(size_t) (b % (int) T.chords.size())];
+            const auto& mel = T.mel[(size_t) (b % (int) T.mel.size())];
+            const int third = c.q == 1 ? 4 : 3, root = inOct (c.root, 37), r3 = inOct (c.root, 48);
+            const double tb = t0 + b * bar;
+            const bool second = b >= 8;   // the second half: the tune changes hands
+            // melody
+            for (int s = 0; s < 8; ++s)
+            {
+                const int m = mel[(size_t) s];
+                if (m <= 0) continue;
+                int len = 1; while (s + len < 8 && mel[(size_t) (s + len)] == 0) ++len;
+                const double t = tb + s * e + (tavern && s % 2 ? 0.045 : 0.0);   // the tavern swings
+                if (tavern) squeeze (tr[tSqueeze], (float) m, t, len * e * 0.92, 0.03f, 0.45f);
+                else if (! second) pluck (tr[tPluck], (float) m, t, len * e * 1.6, 0.2f, 0.6f, 0.996f);
+                else squeeze (tr[tSqueeze], (float) (m - 12), t, len * e * 0.95, 0.022f, 0.4f);
+            }
+            // harmony
+            if (tavern)
+            {
+                bass (tr[tBass], (float) root, tb, beat * 0.9, 0.3f);
+                bass (tr[tBass], (float) (root + 7 > 48 ? root - 5 : root + 7), tb + 2 * beat, beat * 0.9, 0.26f);
+                for (int k : { 1, 3 })
+                    for (int m : { r3 + 12, r3 + 12 + third, r3 + 19 }) pluck (tr[tPluck], (float) m, tb + k * beat, beat * 0.35, 0.07f, 0.3f + 0.1f * (float) (m % 3), 0.99f);
+            }
+            else
+            {
+                bass (tr[tBass], (float) root, tb, beat * 1.9, 0.26f);
+                bass (tr[tBass], (float) (root + 7 > 48 ? root - 5 : root + 7), tb + 2 * beat, beat * 1.9, 0.2f);
+                if (! second) for (int m : { r3, r3 + third, r3 + 7 }) squeeze (tr[tSqueeze], (float) m, tb, bar * 0.98, 0.006f, 0.35f);
+                else for (int s = 0; s < 8; ++s) { const int arp[4] = { 0, third, 7, 12 }; pluck (tr[tPluck], (float) (r3 + 12 + arp[s % 4]), tb + s * e, e * 1.5, 0.08f, 0.65f, 0.994f); }
+            }
+            // rhythm
+            if (tavern)
+            {
+                drum (tr[tDrums], tb, 0.4f, 0.5f); drum (tr[tDrums], tb + 2 * beat, 0.32f, 0.5f);
+                clap (tr[tDrums], tb + beat, 0.05f, 0.4f); clap (tr[tDrums], tb + 3 * beat, 0.05f, 0.6f);
+                for (int s = 0; s < 8; ++s) shaker (tr[tDrums], tb + s * e + (s % 2 ? 0.045 : 0.0), s % 2 ? 0.05f : 0.07f);
+            }
+            else
+            {
+                if (b % 2 == 0) drum (tr[tDrums], tb, 0.22f, 0.5f);
+                for (int s = 0; s < 8; ++s) shaker (tr[tDrums], tb + s * e + (s % 2 ? 0.02 : 0.0), s % 2 ? 0.025f : 0.04f);
+            }
+        }
+        if (! tavern) { bell (tr[tBell], 77.0f, t0, 0.04f, 0.2f); bell (tr[tBell], 72.0f, t0 + 8 * bar, 0.03f, 0.8f); }   // the harbour bell
+    }
+}
+
+static int renderTunes (const juce::File& dir)
+{
+    dir.createDirectory();
+    const double loopSec = 16 * bar;
+    const int loopLen = (int) std::lround (loopSec * sr), xf = (int) (0.5 * sr), block = 512;
+    for (int k = 0; k < 2; ++k)
+    {
+        const bool tavern = k == 1;
+        const Tune& T = tavern ? tavernTune : harbourTune;
+        rnd.setSeed (500 + k);
+        std::array<Buf, numTracks> tr;
+        for (auto& b : tr) { b.setSize (2, loopLen * 3 + block); b.clear(); }
+        for (int p = 0; p < 3; ++p) playTune (tr, T, tavern, p * loopSec);
+        Buf music (2, loopLen * 3 + block);
+        music.clear();
+        for (int t = 0; t < numMusic; ++t) for (int ch = 0; ch < 2; ++ch) music.addFrom (ch, 0, tr[(size_t) t], ch, 0, music.getNumSamples());
+        Head head;
+        auto hoist = makeHoist (head, block);
+        Buf blk (2, block);
+        juce::MidiBuffer mb;
+        for (int pos = 0; pos + block <= music.getNumSamples(); pos += block)
+        {
+            const double ph = 2.0 * juce::MathConstants<double>::pi * std::fmod (pos / sr, loopSec) / loopSec;
+            setP (*hoist, "tide", 0.2f + 0.1f * (float) std::sin (ph)); setP (*hoist, "dread", 0.05f); setP (*hoist, "mix", (tavern ? 0.35f : 0.45f) + 0.05f * (float) std::sin (ph + 1.0));
+            for (int ch = 0; ch < 2; ++ch) blk.copyFrom (ch, 0, music, ch, pos, block);
+            hoist->processBlock (blk, mb);
+            head.ppq += block / sr / beat;
+            for (int ch = 0; ch < 2; ++ch) music.copyFrom (ch, pos, blk, ch, 0, block);
+        }
+        highPass35 (music);
+        writeWav (dir.getChildFile (juce::String (T.name) + ".wav"), seamless (music, loopLen, loopLen, xf));
+        std::printf ("%s: %.2f s (16 bars) written\n", T.name, loopSec);
+    }
+    return 0;
+}
+
 // ------------------------------------------------------------------ reading a new clip: length in bars, chords per bar, key
 namespace
 {
@@ -776,13 +899,14 @@ int main (int argc, char** argv)
     if (argc < 4)
     {
         std::puts ("usage: HoistSoundtrack <clip.wav, 48 kHz> <outdir> stems|video [basslp] [vary] [bpm=99] [chords=auto|Fm,Fm,Db,Db,...]\n"
-                   "       HoistSoundtrack - <outdir> gameamb\n"
+                   "       HoistSoundtrack - <outdir> gameamb   |   HoistSoundtrack - <outdir> tunes   (harbour + tavern)\n"
                    "  The clip is a whole number of bars at the tempo (a short tail after the last bar wraps into the loop's head).\n"
                    "  vary: HOIST automated across the loop and the added parts change pass by pass; the loop becomes at least 16 bars.\n"
                    "  chords: default Fm,Fm,Db,Db repeated (the first clip); give one per bar if the new melody moves differently, or auto.");
         return 2;
     }
     if (juce::String (argv[3]) == "gameamb") return renderGameAmb (juce::File (argv[2]));
+    if (juce::String (argv[3]) == "tunes") return renderTunes (juce::File (argv[2]));
     juce::String chordArg;
     for (int a = 4; a < argc; ++a)
     {
