@@ -720,8 +720,9 @@ static int renderGameAmb (const juce::File& dir)
 // loops (same tempo and key, 16 bars = four of the stage loops, so the game can start them together and cross-fade on the beat).
 namespace
 {
-    void clap (Buf& b, double t0, float gain, float pan)
+    void clap (Buf& b, double t0, float gain, float pan, std::vector<juce::MidiMessage>* midi = nullptr)
     {
+        if (midi) { midi->push_back (juce::MidiMessage::noteOn (10, 39, (juce::uint8) 90).withTimeStamp (t0)); midi->push_back (juce::MidiMessage::noteOff (10, 39).withTimeStamp (t0 + 0.05)); }
         for (int burst = 0; burst < 3; ++burst)   // a hand clap: three quick noise bursts through a band-pass
         {
             float s1 = 0, s2 = 0;
@@ -748,8 +749,10 @@ namespace
           { 80, 0, 79, 80, 75, 0, 72, 0 }, { 70, 0, 75, 79, 77, 75, 73, 0 }, { 72, 0, 77, 0, 75, 0, 72, 0 }, { 76, 0, 0, 0, 72, 0, 67, 0 } } };
 
     // one 16-bar pass of a tune at t0 (tracks: pluck, bass, squeeze, drums, bell)
-    void playTune (std::array<Buf, numTracks>& tr, const Tune& T, bool tavern, double t0)
+    struct TuneMidi { std::vector<juce::MidiMessage> melody, chords, bass, drums, bell; };
+    void playTune (std::array<Buf, numTracks>& tr, const Tune& T, bool tavern, double t0, TuneMidi* md = nullptr)
     {
+        auto M = [&] (std::vector<juce::MidiMessage> TuneMidi::* m) { return md ? &(md->*m) : nullptr; };
         const double e = beat / 2.0;
         auto inOct = [] (int m, int lo) { while (m >= lo + 12) m -= 12; while (m < lo) m += 12; return m; };
         for (int b = 0; b < 16; ++b)
@@ -766,39 +769,40 @@ namespace
                 if (m <= 0) continue;
                 int len = 1; while (s + len < 8 && mel[(size_t) (s + len)] == 0) ++len;
                 const double t = tb + s * e + (tavern && s % 2 ? 0.045 : 0.0);   // the tavern swings
-                if (tavern) squeeze (tr[tSqueeze], (float) m, t, len * e * 0.92, 0.03f, 0.45f);
-                else if (! second) pluck (tr[tPluck], (float) m, t, len * e * 1.6, 0.2f, 0.6f, 0.996f);
-                else squeeze (tr[tSqueeze], (float) (m - 12), t, len * e * 0.95, 0.022f, 0.4f);
+                if (tavern) squeeze (tr[tSqueeze], (float) m, t, len * e * 0.92, 0.03f, 0.45f, M (&TuneMidi::melody));
+                else if (! second) pluck (tr[tPluck], (float) m, t, len * e * 1.6, 0.2f, 0.6f, 0.996f, M (&TuneMidi::melody));
+                else squeeze (tr[tSqueeze], (float) (m - 12), t, len * e * 0.95, 0.022f, 0.4f, M (&TuneMidi::melody));
             }
             // harmony
             if (tavern)
             {
-                bass (tr[tBass], (float) root, tb, beat * 0.9, 0.3f);
-                bass (tr[tBass], (float) (root + 7 > 48 ? root - 5 : root + 7), tb + 2 * beat, beat * 0.9, 0.26f);
+                bass (tr[tBass], (float) root, tb, beat * 0.9, 0.3f, M (&TuneMidi::bass));
+                bass (tr[tBass], (float) (root + 7 > 48 ? root - 5 : root + 7), tb + 2 * beat, beat * 0.9, 0.26f, M (&TuneMidi::bass));
                 for (int k : { 1, 3 })
-                    for (int m : { r3 + 12, r3 + 12 + third, r3 + 19 }) pluck (tr[tPluck], (float) m, tb + k * beat, beat * 0.35, 0.07f, 0.3f + 0.1f * (float) (m % 3), 0.99f);
+                    for (int m : { r3 + 12, r3 + 12 + third, r3 + 19 }) pluck (tr[tPluck], (float) m, tb + k * beat, beat * 0.35, 0.07f, 0.3f + 0.1f * (float) (m % 3), 0.99f, M (&TuneMidi::chords));
             }
             else
             {
-                bass (tr[tBass], (float) root, tb, beat * 1.9, 0.26f);
-                bass (tr[tBass], (float) (root + 7 > 48 ? root - 5 : root + 7), tb + 2 * beat, beat * 1.9, 0.2f);
-                if (! second) for (int m : { r3, r3 + third, r3 + 7 }) squeeze (tr[tSqueeze], (float) m, tb, bar * 0.98, 0.006f, 0.35f);
-                else for (int s = 0; s < 8; ++s) { const int arp[4] = { 0, third, 7, 12 }; pluck (tr[tPluck], (float) (r3 + 12 + arp[s % 4]), tb + s * e, e * 1.5, 0.08f, 0.65f, 0.994f); }
+                bass (tr[tBass], (float) root, tb, beat * 1.9, 0.26f, M (&TuneMidi::bass));
+                bass (tr[tBass], (float) (root + 7 > 48 ? root - 5 : root + 7), tb + 2 * beat, beat * 1.9, 0.2f, M (&TuneMidi::bass));
+                if (! second) for (int m : { r3, r3 + third, r3 + 7 }) squeeze (tr[tSqueeze], (float) m, tb, bar * 0.98, 0.006f, 0.35f, M (&TuneMidi::chords));
+                else for (int s = 0; s < 8; ++s) { const int arp[4] = { 0, third, 7, 12 }; pluck (tr[tPluck], (float) (r3 + 12 + arp[s % 4]), tb + s * e, e * 1.5, 0.08f, 0.65f, 0.994f, M (&TuneMidi::chords)); }
             }
             // rhythm
             if (tavern)
             {
-                drum (tr[tDrums], tb, 0.4f, 0.5f); drum (tr[tDrums], tb + 2 * beat, 0.32f, 0.5f);
-                clap (tr[tDrums], tb + beat, 0.05f, 0.4f); clap (tr[tDrums], tb + 3 * beat, 0.05f, 0.6f);
-                for (int s = 0; s < 8; ++s) shaker (tr[tDrums], tb + s * e + (s % 2 ? 0.045 : 0.0), s % 2 ? 0.05f : 0.07f);
+                drum (tr[tDrums], tb, 0.4f, 0.5f, M (&TuneMidi::drums), 36); drum (tr[tDrums], tb + 2 * beat, 0.32f, 0.5f, M (&TuneMidi::drums), 36);
+                clap (tr[tDrums], tb + beat, 0.05f, 0.4f, M (&TuneMidi::drums)); clap (tr[tDrums], tb + 3 * beat, 0.05f, 0.6f, M (&TuneMidi::drums));
+                for (int s = 0; s < 8; ++s) shaker (tr[tDrums], tb + s * e + (s % 2 ? 0.045 : 0.0), s % 2 ? 0.05f : 0.07f, M (&TuneMidi::drums));
             }
             else
             {
-                if (b % 2 == 0) drum (tr[tDrums], tb, 0.22f, 0.5f);
-                for (int s = 0; s < 8; ++s) shaker (tr[tDrums], tb + s * e + (s % 2 ? 0.02 : 0.0), s % 2 ? 0.025f : 0.04f);
+                if (b % 2 == 0) drum (tr[tDrums], tb, 0.22f, 0.5f, M (&TuneMidi::drums));
+                for (int s = 0; s < 8; ++s) shaker (tr[tDrums], tb + s * e + (s % 2 ? 0.02 : 0.0), s % 2 ? 0.025f : 0.04f, M (&TuneMidi::drums));
             }
         }
         if (! tavern) { bell (tr[tBell], 77.0f, t0, 0.04f, 0.2f); bell (tr[tBell], 72.0f, t0 + 8 * bar, 0.03f, 0.8f); }   // the harbour bell
+        if (! tavern && md) for (auto [n, t] : { std::pair<int, double> { 77, t0 }, { 72, t0 + 8 * bar } }) { md->bell.push_back (juce::MidiMessage::noteOn (1, n, (juce::uint8) 80).withTimeStamp (t)); md->bell.push_back (juce::MidiMessage::noteOff (1, n).withTimeStamp (t + 3.0)); }
     }
 }
 
@@ -814,7 +818,41 @@ static int renderTunes (const juce::File& dir)
         rnd.setSeed (500 + k);
         std::array<Buf, numTracks> tr;
         for (auto& b : tr) { b.setSize (2, loopLen * 3 + block); b.clear(); }
-        for (int p = 0; p < 3; ++p) playTune (tr, T, tavern, p * loopSec);
+        TuneMidi md;
+        for (int p = 0; p < 3; ++p) playTune (tr, T, tavern, p * loopSec, p == 1 ? &md : nullptr);
+        {   // MIDI (one file per part + one multitrack file with General MIDI sounds) and a dry stem per part
+            const juce::String base (T.name);
+            auto shift = [loopSec] (std::vector<juce::MidiMessage> v) { for (auto& m : v) m.setTimeStamp (m.getTimeStamp() - loopSec); return v; };
+            struct Part { const char* name; std::vector<juce::MidiMessage>* ev; int ch, program; };
+            const Part parts[] = { { tavern ? "melody_squeezebox" : "melody_pluck_then_squeezebox", &md.melody, 1, tavern ? 21 : 24 },
+                                   { tavern ? "chords_pluck" : "chords_squeezebox_then_pluck", &md.chords, 2, tavern ? 24 : 21 },
+                                   { "bass", &md.bass, 3, 32 }, { "drums", &md.drums, 10, -1 }, { "bell", &md.bell, 4, 14 } };
+            juce::MidiFile all; all.setTicksPerQuarterNote (960);
+            { juce::MidiMessageSequence meta; meta.addEvent (juce::MidiMessage::tempoMetaEvent ((int) std::lround (60000000.0 / bpm))); meta.addEvent (juce::MidiMessage::timeSignatureMetaEvent (4, 4));
+              meta.addEvent (juce::MidiMessage::textMetaEvent (3, base + " (F minor, 99 BPM, 16 bars)")); all.addTrack (meta); }
+            for (auto& P : parts)
+            {
+                if (P.ev->empty()) continue;
+                auto ev = shift (*P.ev);
+                for (auto& m : ev) if (P.ch != 10 && m.getChannel() != P.ch) m.setChannel (P.ch);
+                writeMidi (dir.getChildFile (base + "_" + P.name + ".mid"), ev, P.name);
+                juce::MidiMessageSequence seq;
+                seq.addEvent (juce::MidiMessage::textMetaEvent (3, P.name));
+                if (P.program >= 0) seq.addEvent (juce::MidiMessage::programChange (P.ch, P.program));
+                for (auto m : ev) { m.setTimeStamp (m.getTimeStamp() / beat * 960.0); seq.addEvent (m); }
+                seq.updateMatchedPairs(); all.addTrack (seq);
+            }
+            // each instrument as it sounds in the game (dry, before HOIST; the middle pass)
+            const std::pair<int, const char*> inst[] = { { tPluck, "pluck" }, { tSqueeze, "squeezebox" }, { tBass, "bass" }, { tDrums, "drums" }, { tBell, "bell" } };
+            for (auto [t, nm] : inst)
+            {
+                Buf stem (2, loopLen);
+                for (int ch = 0; ch < 2; ++ch) stem.copyFrom (ch, 0, tr[(size_t) t], ch, loopLen, loopLen);
+                if (stem.getMagnitude (0, loopLen) > 1.0e-5f) writeWav (dir.getChildFile (base + "_stem_" + nm + "_dry.wav"), stem);
+            }
+            dir.getChildFile (base + "_all_parts.mid").deleteFile();
+            juce::FileOutputStream os (dir.getChildFile (base + "_all_parts.mid")); all.writeTo (os);
+        }
         Buf music (2, loopLen * 3 + block);
         music.clear();
         for (int t = 0; t < numMusic; ++t) for (int ch = 0; ch < 2; ++ch) music.addFrom (ch, 0, tr[(size_t) t], ch, 0, music.getNumSamples());
