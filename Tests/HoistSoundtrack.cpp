@@ -876,6 +876,48 @@ static int renderTunes (const juce::File& dir)
     return 0;
 }
 
+// ------------------------------------------------------------------ sample pack: every note of each instrument, as the game plays it
+// mono 24-bit, 48 kHz, one file per note (dir/<instrument>/<instrument>_<midi>.wav); levels as in the game
+static int renderSamples (const juce::File& dir)
+{
+    auto one = [&] (const juce::String& inst, int note, double secs, auto&& fn)
+    {
+        Buf b (2, (int) (secs * sr) + 16);
+        b.clear();
+        fn (b);
+        Buf m (1, b.getNumSamples());
+        m.copyFrom (0, 0, b, 0, 0, b.getNumSamples());
+        m.applyGain (1.41421356f);   // addMono at the centre puts 0.707 in each side
+        const auto f = dir.getChildFile (inst).getChildFile (inst + "_" + juce::String (note).paddedLeft ('0', 3) + ".wav");
+        f.getParentDirectory().createDirectory();
+        f.deleteFile();
+        juce::WavAudioFormat wav;
+        std::unique_ptr<juce::AudioFormatWriter> w (wav.createWriterFor (new juce::FileOutputStream (f), sr, 1, 24, {}, 0));
+        w->writeFromAudioSampleBuffer (m, 0, m.getNumSamples());
+    };
+    rnd.setSeed (909);
+    for (int n = 48; n <= 84; ++n) one ("pluck", n, 4.0, [&] (Buf& b) { pluck (b, (float) n, 0.0, 4.0, 0.18f, 0.5f, 0.996f); });          // melodies
+    for (int n = 48; n <= 84; ++n) one ("pluck_stab", n, 1.5, [&] (Buf& b) { pluck (b, (float) n, 0.0, 1.5, 0.07f, 0.5f, 0.99f); });       // tavern off-beat chords
+    for (int n = 28; n <= 55; ++n) one ("bass", n, 4.0, [&] (Buf& b) { bass (b, (float) n, 0.0, 4.0, 0.3f); });
+    for (int n = 41; n <= 84; ++n) one ("squeezebox", n, 6.0, [&] (Buf& b) { squeeze (b, (float) n, 0.0, 6.0, 0.03f, 0.5f); });
+    for (int n = 36; n <= 84; ++n) one ("bell", n, 6.0, [&] (Buf& b) { bell (b, (float) n, 0.0, 0.05f, 0.5f); });
+    for (int n = 24; n <= 52; ++n) one ("subdrone", n, 8.0, [&] (Buf& b)   // the stage 4-5 drone, held (the game fades it in over its length)
+    {
+        const float f = hz ((float) n);
+        for (int i = 0; i < (int) (8.0 * sr); ++i)
+        {
+            const float tt = (float) (i / sr), env = juce::jmin (1.0f, tt / 0.4f);
+            addMono (b, tt, 0.12f * env * (std::sin (twoPi * f * tt) + 0.3f * std::sin (twoPi * f * 2.0f * tt)) * (0.85f + 0.15f * std::sin (twoPi * 0.4f * tt)));
+        }
+    });
+    // drums: one-shots on their General MIDI keys (several takes of the noisy ones)
+    one ("drums", 45, 0.6, [&] (Buf& b) { drum (b, 0.0, 0.45f, 0.5f); });        // frame drum (also the stomp 36 and the knock 41: same drum, used at other levels)
+    for (int k = 0; k < 4; ++k) one ("drums", 700 + k, 0.1, [&] (Buf& b) { shaker (b, 0.0, 0.08f); });   // shaker, 4 takes (key 70)
+    for (int k = 0; k < 3; ++k) one ("drums", 390 + k, 0.15, [&] (Buf& b) { clap (b, 0.0, 0.05f, 0.5f); }); // clap, 3 takes (key 39)
+    std::puts ("samples written");
+    return 0;
+}
+
 // ------------------------------------------------------------------ reading a new clip: length in bars, chords per bar, key
 namespace
 {
@@ -945,6 +987,7 @@ int main (int argc, char** argv)
     }
     if (juce::String (argv[3]) == "gameamb") return renderGameAmb (juce::File (argv[2]));
     if (juce::String (argv[3]) == "tunes") return renderTunes (juce::File (argv[2]));
+    if (juce::String (argv[3]) == "samples") return renderSamples (juce::File (argv[2]));
     juce::String chordArg;
     for (int a = 4; a < argc; ++a)
     {
