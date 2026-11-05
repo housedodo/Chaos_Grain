@@ -19,7 +19,18 @@ juce::AudioProcessor* JUCE_CALLTYPE createPluginFilter();
 namespace
 {
     constexpr double sr = 48000.0;
-    constexpr double bpm = 99.0, beat = 60.0 / bpm, bar = 4.0 * beat, L = 4.0 * bar;   // 9.697 s loop
+    // tempo and the 4-bar block (set in main: bpm=; default 99 BPM -> a 9.697 s block)
+    double bpm = 99.0, beat = 60.0 / bpm, bar = 4.0 * beat, L = 4.0 * bar;
+    void setTempo (double b) { bpm = b; beat = 60.0 / bpm; bar = 4.0 * beat; L = 4.0 * bar; }
+
+    // the clip can be any whole number of bars: the game loop is `reps` blocks of 4 bars, the clip fills `clipBlocks` of them
+    int reps = 1, clipBlocks = 1, clipBars = 4;
+    // vary: HOIST automated across the loop and the added parts change from block to block (off = the original kit)
+    bool vary = false;
+    // harmony per bar of the clip: root (MIDI, any octave) and quality (0 minor, 1 major, 2 diminished)
+    struct Chord { int root, q; };
+    std::vector<Chord> chords { { 41, 0 }, { 41, 0 }, { 37, 1 }, { 37, 1 } };   // the first clip: Fm Fm Db Db
+    Chord chordAt (int barIndex) { return chords[(size_t) (barIndex % (int) chords.size())]; }
     constexpr int numStages = 5;
     const float twoPi = juce::MathConstants<float>::twoPi;
     float hz (float m) { return 440.0f * std::pow (2.0f, (m - 69.0f) / 12.0f); }
@@ -256,21 +267,25 @@ namespace
     // ---------------------------------------------------------------- the arrangement of one stage (one 4-bar loop at t0)
     // F minor: bars 1-2 Fm, bars 3-4 Db (the clip's harmony). "Horror by removing and bending."
     struct Midi { std::vector<juce::MidiMessage> pluck, bass, squeeze, drums; };
-    void arrange (std::array<Buf, numTracks>& tr, const Buf& clip, int stage, double t0, Midi* midi)
+    void arrange (std::array<Buf, numTracks>& tr, const Buf& clip, int stage, double t0, Midi* midi, int rep = 0)
     {
+        const int r4 = vary ? rep % 4 : 0;   // which pass of the loop this block is (only matters with vary)
         // the clip itself: darker and thinner as the dread grows; in the abyss only fragments
         {
             const float level[5] = { 1.0f, 0.85f, 0.75f, 0.55f, 0.35f }, cut[5] = { 20000.0f, 3000.0f, 2000.0f, 700.0f, 450.0f };
             const float a = 1.0f - std::exp (-twoPi * cut[stage] / (float) sr);
             float s[4] = {};
-            const int n0 = (int) (t0 * sr), len = (int) (L * sr);
+            const int n0 = (int) (t0 * sr), blockLen = (int) (L * sr), cb = rep % clipBlocks, off = cb * blockLen, cn = clip.getNumSamples();
+            const bool lastBlock = cb == clipBlocks - 1;
+            const int len = lastBlock ? juce::jmax (0, cn - off) : juce::jmin (blockLen, juce::jmax (0, cn - off));   // the last block keeps the clip's tail
+            const double frag = vary ? 0.5 * bar * r4 : 0.0;   // abyss: the fragments drift through the bar
             for (int i = 0; i < len; ++i)
             {
                 float g = level[stage];
-                if (stage == 4) { const double tb = std::fmod (i / sr, 2 * bar); g *= tb < 1.4 * bar ? (float) std::sin (3.1416 * tb / (1.4 * bar)) : 0.0f; }
+                if (stage == 4) { const double tb = std::fmod (i / sr + frag, 2 * bar); g *= tb < 1.4 * bar ? (float) std::sin (3.1416 * tb / (1.4 * bar)) : 0.0f; }
                 for (int ch = 0; ch < 2; ++ch)
                 {
-                    float x = clip.getSample (ch, i % clip.getNumSamples());
+                    float x = clip.getSample (juce::jmin (ch, clip.getNumChannels() - 1), off + i);
                     if (cut[stage] < 19000.0f) { s[ch * 2] += a * (x - s[ch * 2]); s[ch * 2 + 1] += a * (s[ch * 2] - s[ch * 2 + 1]); x = s[ch * 2 + 1]; }
                     if (n0 + i < tr[tClip].getNumSamples()) tr[tClip].addSample (ch, n0 + i, x * g);
                 }
@@ -278,55 +293,83 @@ namespace
         }
         const double e = beat / 2.0;   // eighth
         auto M = [&] (std::vector<juce::MidiMessage> Midi::* m) { return midi ? &(midi->*m) : nullptr; };
-        // pluck counter-melody (eighths; 0 = hold)
+        // harmony of each bar of this block (the clip's chords; the default is the first clip's Fm Fm Db Db)
+        const int cb = rep % clipBlocks;
+        auto ch = [&] (int b) { return chordAt (cb * 4 + b); };
+        auto inOct = [] (int m, int lo) { while (m >= lo + 12) m -= 12; while (m < lo) m += 12; return m; };
+        auto third = [] (const Chord& c) { return c.q == 1 ? 4 : 3; };
+        auto fifthOf = [] (const Chord& c) { return c.q == 2 ? 6 : 7; };
+        // pluck counter-melody (eighths; 0 = hold): written over Fm (bars A, B) and Db (C, D); other chords get A/B moved
+        // to their root and snapped into F minor
         const int mel[4][8] = { { 72, 0, 68, 70, 72, 0, 75, 0 }, { 77, 0, 75, 72, 68, 0, 0, 0 },
                                 { 73, 0, 72, 68, 65, 0, 68, 0 }, { 72, 0, 70, 68, 67, 0, 0, 0 } };
+        auto melNote = [&] (int b, int s)
+        {
+            const int pc = ((ch (b).root % 12) + 12) % 12, alt = b % 2;
+            if (pc == 5) return mel[alt][s];
+            if (pc == 1) return mel[2 + alt][s];
+            int m = mel[alt][s];
+            if (m == 0) return 0;
+            int d = (pc - 5 + 12) % 12; if (d > 6) d -= 12;
+            m += d;
+            static const bool inKey[12] = { 1, 1, 0, 1, 0, 1, 0, 1, 1, 0, 1, 0 };   // F natural minor: C Db Eb F G Ab Bb
+            if (! inKey[((m % 12) + 12) % 12]) --m;
+            return m;
+        };
         for (int b = 0; b < 4; ++b)
             for (int s = 0; s < 8; ++s)
             {
-                int m = mel[b][s];
+                int m = melNote (b, s);
                 if (m == 0) continue;
-                int len = 1; while (s + len < 8 && mel[b][s + len] == 0) ++len;
+                int len = 1; while (s + len < 8 && melNote (b, s + len) == 0) ++len;
                 const double t = t0 + b * bar + s * e;
-                if (stage == 0) pluck (tr[tPluck], (float) m, t, len * e * 1.4, 0.18f, 0.7f, 0.996f, M (&Midi::pluck));
-                else if (stage == 1 && (b % 2 == 0) && s < 4) pluck (tr[tPluck], (float) m, t, len * e * 2.0, 0.14f, 0.7f, 0.994f, M (&Midi::pluck));
-                else if (stage == 2 && (b == 0 || b == 2) && s < 3) pluck (tr[tPluck], (float) (b == 2 && s == 2 ? 66 : m), t + 0.04 * s, len * e * 2.5, 0.12f, 0.75f, 0.993f, M (&Midi::pluck));
-                else if (stage == 3 && (b == 0 || b == 2) && s == 0) pluck (tr[tPluck], (float) m, t, 2.5, 0.08f, 0.8f, 0.998f, M (&Midi::pluck));
+                if (stage == 0) { if (r4 == 3 && s > 0) continue; pluck (tr[tPluck], (float) m, t, len * e * (r4 == 3 ? 3.0 : 1.4), 0.18f, 0.7f, 0.996f, M (&Midi::pluck)); }
+                else if (stage == 1 && (b % 2 == 0) && s < 4 && r4 != 2) pluck (tr[tPluck], (float) m, t, len * e * 2.0, 0.14f, 0.7f, 0.994f, M (&Midi::pluck));
+                else if (stage == 2 && (b == 0 || b == 2) && s < 3)
+                {
+                    const bool wrong = b == 2 && s == 2 && (! vary || r4 % 2 == 0);   // the one wrong note: a fourth over the root (Gb over Db); with vary only every other pass
+                    pluck (tr[tPluck], (float) (wrong ? inOct (ch (b).root + 5, 60) : m), t + 0.04 * s, len * e * 2.5, 0.12f, 0.75f, 0.993f, M (&Midi::pluck));
+                }
+                else if (stage == 3 && (b == 0 || b == 2) && s == 0 && r4 == 0) pluck (tr[tPluck], (float) m, t, 2.5, 0.08f, 0.8f, 0.998f, M (&Midi::pluck));
             }
-        // bass
-        const int root[4] = { 41, 41, 37, 37 }, fifth[4] = { 48, 44, 44, 41 };
+        // bass: root on the one, then the fifth (bars A, C) or the third (B, D)
         for (int b = 0; b < 4; ++b)
         {
             const double t = t0 + b * bar;
-            if (stage == 0) { bass (tr[tBass], (float) root[b], t, beat * 1.8, 0.35f, M (&Midi::bass)); bass (tr[tBass], (float) fifth[b], t + 2 * beat, beat * 1.8, 0.28f, M (&Midi::bass)); }
-            else if (stage == 1) bass (tr[tBass], (float) root[b], t, bar * 0.95, 0.32f, M (&Midi::bass));
-            else if (stage == 2 && b % 2 == 0) bass (tr[tBass], (float) root[b], t, bar * 1.9, 0.3f, M (&Midi::bass));
+            const Chord c = ch (b);
+            const int root = inOct (c.root, 37), second = root + (b % 2 == 0 ? fifthOf (c) : third (c));
+            if (stage == 0) { bass (tr[tBass], (float) root, t, beat * 1.8, 0.35f, M (&Midi::bass)); bass (tr[tBass], (float) second, t + 2 * beat, beat * 1.8, 0.28f, M (&Midi::bass)); }
+            else if (stage == 1 && r4 == 3) { if (b % 2 == 0) bass (tr[tBass], (float) root, t, bar * 1.9, 0.32f, M (&Midi::bass)); }
+            else if (stage == 1) bass (tr[tBass], (float) root, t, bar * 0.95, 0.32f, M (&Midi::bass));
+            else if (stage == 2 && b % 2 == 0) bass (tr[tBass], (float) root, t, bar * 1.9, 0.3f, M (&Midi::bass));
         }
-        if (stage == 3) { subDrone (tr[tBass], 41.0f, t0, L * 0.52, 0.12f); subDrone (tr[tBass], 37.0f, t0 + L * 0.5, L * 0.52, 0.12f); }   // F2 / Db2 drone
+        if (stage == 3) { subDrone (tr[tBass], (float) inOct (ch (0).root, 37), t0, L * 0.52, 0.12f); subDrone (tr[tBass], (float) inOct (ch (2).root, 37), t0 + L * 0.5, L * 0.52, 0.12f); }   // F2 / Db2 drone
         if (stage == 4) subDrone (tr[tBass], 41.0f, t0, L, 0.09f);
         // squeezebox: off-beat chords, shanty lilt (fair weather only)
         if (stage == 0)
             for (int b = 0; b < 4; ++b)
+            {
+                if (r4 == 1 && b >= 2) continue;
+                const Chord c = ch (b);
+                const int r = inOct (c.root, 48);
                 for (int k : { 1, 3 })
-                {
-                    const std::vector<int> ch = b < 2 ? std::vector<int> { 53, 56, 60 } : std::vector<int> { 49, 53, 56 };
-                    for (int m : ch) squeeze (tr[tSqueeze], (float) m, t0 + b * bar + k * beat, beat * 0.45, 0.012f, 0.35f, M (&Midi::squeeze));
-                }
+                    for (int m : { r, r + third (c), r + fifthOf (c) }) squeeze (tr[tSqueeze], (float) m, t0 + b * bar + k * beat, beat * 0.45, 0.012f, 0.35f, M (&Midi::squeeze));
+            }
         // drums: frame drum + shaker -> fewer -> knocks -> a heartbeat -> one far thud
         for (int b = 0; b < 4; ++b)
         {
             const double t = t0 + b * bar;
             if (stage == 0) { drum (tr[tDrums], t, 0.45f, 0.5f, M (&Midi::drums)); drum (tr[tDrums], t + 2 * beat, 0.35f, 0.5f, M (&Midi::drums));
-                              for (int s = 0; s < 8; ++s) shaker (tr[tDrums], t + s * e + (s % 2 ? 0.02 : 0.0), s % 2 ? 0.05f : 0.08f, M (&Midi::drums)); }
+                              for (int s = 0; s < 8; ++s) if (r4 != 2 || s % 2 == 0) shaker (tr[tDrums], t + s * e + (s % 2 ? 0.02 : 0.0), s % 2 ? 0.05f : 0.08f, M (&Midi::drums)); }
             else if (stage == 1) { drum (tr[tDrums], t, 0.4f, 0.5f, M (&Midi::drums)); for (int s = 0; s < 4; ++s) shaker (tr[tDrums], t + s * beat, 0.04f, M (&Midi::drums)); }
             else if (stage == 2 && (b == 0 || b == 2)) drum (tr[tDrums], t + (b == 2 ? 2.5 * beat : 0.0), 0.35f, b == 2 ? 0.25f : 0.5f, M (&Midi::drums), 41);
-            else if (stage == 3) { drum (tr[tDrums], t, 0.45f, 0.5f, M (&Midi::drums), 36); drum (tr[tDrums], t + 0.28, 0.3f, 0.5f, M (&Midi::drums), 36); }
-            else if (stage == 4 && b == 0) drum (tr[tDrums], t, 0.25f, 0.4f, M (&Midi::drums), 36);
+            else if (stage == 3) { drum (tr[tDrums], t, 0.45f, 0.5f, M (&Midi::drums), 36); if (! (r4 == 3 && b >= 2)) drum (tr[tDrums], t + 0.28, 0.3f, 0.5f, M (&Midi::drums), 36); }
+            else if (stage == 4 && b == (r4 == 2 ? 2 : 0)) drum (tr[tDrums], t, 0.25f, 0.4f, M (&Midi::drums), 36);
         }
         // the ship's bell: bright and far -> bent -> very low and wrong
-        if (stage == 0) bell (tr[tBell], 77.0f, t0, 0.05f, 0.2f);
-        if (stage == 2) bell (tr[tBell], 77.0f, t0 + 2 * bar, 0.05f, 0.8f, -45.0f, 6.0f);
-        if (stage == 4) bell (tr[tBell], 53.0f, t0 + bar, 0.06f, 0.6f, -60.0f, 9.0f);
+        if (stage == 0 && r4 % 2 == 0) bell (tr[tBell], 77.0f, t0, 0.05f, 0.2f);
+        if (stage == 2 && r4 != 1) bell (tr[tBell], 77.0f, t0 + 2 * bar, 0.05f, 0.8f, -45.0f - 8.0f * (float) r4, 6.0f);
+        if (stage == 4 && (! vary || r4 == 1)) bell (tr[tBell], 53.0f, t0 + bar, 0.06f, 0.6f, -60.0f, 9.0f);
     }
 
     void ambience (std::array<Buf, numTracks>& tr, int stage, double t0, double t1)
@@ -442,15 +485,17 @@ namespace
 static int renderStems (const Buf& clip, const juce::File& dir)
 {
     dir.createDirectory();
-    const int loopLen = (int) std::lround (L * sr), xf = (int) (0.5 * sr), block = 512;
+    const double loopSec = reps * L;
+    const int loopLen = (int) std::lround (loopSec * sr), xf = (int) (0.5 * sr), block = 512;
     for (int s = 0; s < numStages; ++s)
     {
         // three loops of the arrangement through HOIST; keep the middle one (tails included), seamless
         std::array<Buf, numTracks> tr;
         for (auto& b : tr) { b.setSize (2, loopLen * 3 + block); b.clear(); }
         Midi midi;
-        for (int k = 0; k < 3; ++k) arrange (tr, clip, s, k * L, k == 1 ? &midi : nullptr);
-        ambience (tr, s, 0.0, 3.0 * L);
+        for (int k = 0; k < 3; ++k)
+            for (int r = 0; r < reps; ++r) arrange (tr, clip, s, (k * reps + r) * L, k == 1 ? &midi : nullptr, r);
+        ambience (tr, s, 0.0, 3.0 * loopSec);
         if (bassLowpass && bassCut[s] > 0.0f) lowPass2 (tr[tBass], bassCut[s]);
         Buf music (2, loopLen * 3 + block), amb (2, loopLen * 3 + block);
         music.clear(); amb.clear();
@@ -464,6 +509,14 @@ static int renderStems (const Buf& clip, const juce::File& dir)
         for (int pos = 0; pos + block <= music.getNumSamples(); pos += block)
         {
             for (int ch = 0; ch < 2; ++ch) blk.copyFrom (ch, 0, music, ch, pos, block);
+            if (vary)   // HOIST drifts across the loop (whole periods, so the loop stays seamless): the swell, the dread and the mix breathe
+            {
+                const double ph = 2.0 * juce::MathConstants<double>::pi * std::fmod (pos / sr, loopSec) / loopSec;
+                const auto& S = stageSet[s];
+                setP (*hoist, "tide", juce::jlimit (0.0f, 1.0f, S.tide + 0.12f * (float) std::sin (ph)));
+                setP (*hoist, "dread", juce::jlimit (0.0f, 1.0f, S.dread + 0.06f * (float) std::sin (2.0 * ph + 1.3)));
+                setP (*hoist, "mix", juce::jlimit (0.0f, 1.0f, S.mix + 0.05f * (float) std::sin (ph + 2.4)));
+            }
             hoist->processBlock (blk, mb);
             head.ppq += block / sr / beat;
             for (int ch = 0; ch < 2; ++ch) music.copyFrom (ch, pos, blk, ch, 0, block);
@@ -471,13 +524,13 @@ static int renderStems (const Buf& clip, const juce::File& dir)
         highPass35 (music); highPass35 (amb);
         writeWav (dir.getChildFile ("music_" + juce::String (s + 1) + ".wav"), seamless (music, loopLen, loopLen, xf));
         writeWav (dir.getChildFile ("amb_" + juce::String (s + 1) + ".wav"), seamless (amb, loopLen, loopLen, xf));
-        auto shift = [] (std::vector<juce::MidiMessage> v) { for (auto& m : v) m.setTimeStamp (m.getTimeStamp() - L); return v; };
+        auto shift = [loopSec] (std::vector<juce::MidiMessage> v) { for (auto& m : v) m.setTimeStamp (m.getTimeStamp() - loopSec); return v; };
         const juce::String st = "stage" + juce::String (s + 1) + "_";
         if (! midi.pluck.empty())   writeMidi (dir.getChildFile (st + "pluck_counter_melody.mid"), shift (midi.pluck), "Pluck counter-melody");
         if (! midi.bass.empty())    writeMidi (dir.getChildFile (st + "bass.mid"), shift (midi.bass), "Bass");
         if (! midi.squeeze.empty()) writeMidi (dir.getChildFile (st + "squeezebox.mid"), shift (midi.squeeze), "Squeezebox");
         if (! midi.drums.empty())   writeMidi (dir.getChildFile (st + "drums.mid"), shift (midi.drums), "Drums (GM: 45 frame drum, 41/36 low, 70 shaker)");
-        std::printf ("stage %d: music + ambience loops (%.2f s) written\n", s + 1, L);
+        std::printf ("stage %d: music + ambience loops (%.2f s, %d bars) written\n", s + 1, loopSec, reps * 4);
     }
     return 0;
 }
@@ -486,7 +539,7 @@ static int renderStems (const Buf& clip, const juce::File& dir)
 namespace
 {
     constexpr int W = 1280, H = 720, fps = 30, vBlock = 400, blocksPerFrame = (int) (sr / fps) / vBlock;
-    constexpr double stageLen = 2.0 * L;   // ~19.4 s per stage
+    const double stageLen = 2.0 * L;   // ~19.4 s per stage
     constexpr double xfade = 2.0;
 
     struct Cap { const char* title; std::vector<const char*> body; std::vector<const char*> fl; };
@@ -662,13 +715,123 @@ static int renderGameAmb (const juce::File& dir)
     return 0;
 }
 
+// ------------------------------------------------------------------ reading a new clip: length in bars, chords per bar, key
+namespace
+{
+    const char* pcName[12] = { "C", "Db", "D", "Eb", "E", "F", "Gb", "G", "Ab", "A", "Bb", "B" };
+    // pitch-class energy of clip[from, to) between lo and hi Hz (Goertzel over three octaves per class)
+    std::array<double, 12> chroma (const Buf& clip, int from, int to, int octLo, int octHi)
+    {
+        std::array<double, 12> c {};
+        const int n = juce::jmin (to, clip.getNumSamples()) - from;
+        if (n <= 64) return c;
+        for (int pc = 0; pc < 12; ++pc)
+            for (int oct = octLo; oct <= octHi; ++oct)
+            {
+                const double f = 440.0 * std::pow (2.0, (12 * (oct + 1) + pc - 69) / 12.0), w = 2.0 * std::cos (2.0 * juce::MathConstants<double>::pi * f / sr);
+                double s1 = 0, s2 = 0;
+                for (int i = 0; i < n; i += 2)   // every other sample is plenty up to ~2 kHz
+                {
+                    const double x = 0.5 * (clip.getSample (0, from + i) + clip.getSample (juce::jmin (1, clip.getNumChannels() - 1), from + i));
+                    const double s0 = x + (w * s1 - s2) * 1.0; s2 = s1; s1 = s0;
+                }
+                c[(size_t) pc] += s1 * s1 + s2 * s2 - w * s1 * s2;
+            }
+        return c;
+    }
+    Chord guessChord (const Buf& clip, int from, int to)
+    {
+        // the chords of F minor (natural, plus a major V)
+        const Chord cand[8] = { { 41, 0 }, { 43, 2 }, { 44, 1 }, { 46, 0 }, { 48, 0 }, { 48, 1 }, { 37, 1 }, { 39, 1 } };
+        auto norm = [] (std::array<double, 12> x) { double t = 1e-12; for (auto v : x) t += v; for (auto& v : x) v /= t; return x; };
+        const auto lo = norm (chroma (clip, from, to, 1, 2)), c = norm (chroma (clip, from, to, 3, 5));   // the bass decides the root
+        double best = -1; Chord bc = cand[0];
+        for (auto k : cand)
+        {
+            const int r = k.root % 12, t = (r + (k.q == 1 ? 4 : 3)) % 12, f = (r + (k.q == 2 ? 6 : 7)) % 12;
+            const double score = 2.0 * lo[(size_t) r] + 0.5 * lo[(size_t) f] + c[(size_t) r] + c[(size_t) t] + 0.8 * c[(size_t) f];
+            if (score > best) { best = score; bc = k; }
+        }
+        return bc;
+    }
+    juce::String chordName (Chord c) { return juce::String (pcName[c.root % 12]) + (c.q == 0 ? "m" : c.q == 2 ? "dim" : ""); }
+    bool parseChord (juce::String t, Chord& out)
+    {
+        t = t.trim();
+        int q = 1;
+        if (t.endsWithIgnoreCase ("dim")) { q = 2; t = t.dropLastCharacters (3); }
+        else if (t.endsWith ("m")) { q = 0; t = t.dropLastCharacters (1); }
+        for (int pc = 0; pc < 12; ++pc)
+        {
+            const juce::String sharp[12] = { "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B" };
+            if (t.equalsIgnoreCase (pcName[pc]) || t.equalsIgnoreCase (sharp[pc])) { out = { 36 + pc, q }; return true; }
+        }
+        return false;
+    }
+}
+
 int main (int argc, char** argv)
 {
     juce::ScopedJuceInitialiser_GUI init;
-    if (argc < 4) { std::puts ("usage: HoistSoundtrack <clip48k.wav> <outdir> stems|video [basslp]  |  HoistSoundtrack - <outdir> gameamb"); return 2; }
+    if (argc < 4)
+    {
+        std::puts ("usage: HoistSoundtrack <clip.wav, 48 kHz> <outdir> stems|video [basslp] [vary] [bpm=99] [chords=auto|Fm,Fm,Db,Db,...]\n"
+                   "       HoistSoundtrack - <outdir> gameamb\n"
+                   "  The clip is a whole number of bars at the tempo (a short tail after the last bar wraps into the loop's head).\n"
+                   "  vary: HOIST automated across the loop and the added parts change pass by pass; the loop becomes at least 16 bars.\n"
+                   "  chords: default Fm,Fm,Db,Db repeated (the first clip); give one per bar if the new melody moves differently, or auto.");
+        return 2;
+    }
     if (juce::String (argv[3]) == "gameamb") return renderGameAmb (juce::File (argv[2]));
-    bassLowpass = argc > 4 && juce::String (argv[4]) == "basslp";
+    juce::String chordArg;
+    for (int a = 4; a < argc; ++a)
+    {
+        const juce::String t (argv[a]);
+        if (t == "basslp") bassLowpass = true;
+        else if (t == "vary") vary = true;
+        else if (t.startsWith ("bpm=")) setTempo (t.fromFirstOccurrenceOf ("=", false, false).getDoubleValue());
+        else if (t.startsWith ("chords=")) chordArg = t.fromFirstOccurrenceOf ("=", false, false);
+        else { std::printf ("unknown option %s\n", argv[a]); return 2; }
+    }
     const auto clip = loadClip (juce::File (argv[1]));
     const juce::File dir (argv[2]);
+    // length: whole bars (a tail under half a bar is the reverb/ring-out and wraps round)
+    const double secs = clip.getNumSamples() / sr, bars = secs / bar;
+    clipBars = juce::jmax (1, (int) std::floor (bars + 0.5));
+    const double off = secs - clipBars * bar;
+    std::printf ("clip: %.3f s = %.2f bars at %.1f BPM -> %d bars%s\n", secs, bars, bpm, clipBars,
+                 off > 0.02 ? " (+ a tail that wraps into the head)" : off < -0.02 ? " (padded with silence to the bar)" : "");
+    if (std::abs (off) > 0.35 * bar) std::printf ("WARNING: the clip is %.2f bars off the grid: is it really %.0f BPM? (bpm=...)\n", off / bar, bpm);
+    clipBlocks = (clipBars + 3) / 4;
+    if (clipBars % 4) std::printf ("note: %d bars is not a multiple of 4; padded to %d bars\n", clipBars, clipBlocks * 4);
+    reps = vary ? clipBlocks * juce::jmax (1, (4 + clipBlocks - 1) / clipBlocks) : clipBlocks;
+    // key: the game's main key is F minor
+    {
+        const auto c = chroma (clip, 0, clip.getNumSamples(), 3, 5);
+        int bestKey = 0; double best = -1;
+        for (int k = 0; k < 12; ++k)   // natural-minor profile on each tonic
+        {
+            const int deg[7] = { 0, 2, 3, 5, 7, 8, 10 }; const double wgt[7] = { 2.0, 0.6, 1.2, 0.9, 1.4, 0.8, 0.7 };
+            double sc = 0; for (int d = 0; d < 7; ++d) sc += wgt[d] * c[(size_t) ((k + deg[d]) % 12)];
+            if (sc > best) { best = sc; bestKey = k; }
+        }
+        std::printf ("key: sounds like %s minor%s\n", pcName[bestKey], bestKey == 5 ? " (the game's key)" : " - WARNING: the game is in F minor; the added parts will clash");
+    }
+    // chords per bar
+    {   // a guess from the clip, always printed so it can be checked against what you wrote
+        std::vector<Chord> g;
+        const int barLen = (int) std::lround (bar * sr);
+        for (int b = 0; b < clipBars; ++b) g.push_back (guessChord (clip, b * barLen, (b + 1) * barLen));
+        juce::String gs; for (auto& c : g) gs << chordName (c) << " ";
+        std::printf ("chords heard (a guess): %s\n", gs.toRawUTF8());
+        if (chordArg == "auto") chords = g;
+    }
+    if (chordArg.isNotEmpty() && chordArg != "auto")
+    {
+        chords.clear();
+        for (auto& t : juce::StringArray::fromTokens (chordArg, ",", "")) { Chord c; if (! parseChord (t, c)) { std::printf ("bad chord '%s'\n", t.toRawUTF8()); return 2; } chords.push_back (c); }
+    }
+    juce::String cs; for (auto& c : chords) cs << chordName (c) << " ";
+    std::printf ("chords per bar: %s\nloop: %d bars (%.2f s)%s\n", cs.toRawUTF8(), reps * 4, reps * L, vary ? ", HOIST automated, parts vary pass by pass" : "");
     return juce::String (argv[3]) == "video" ? renderVideo (clip, dir) : renderStems (clip, dir);
 }
