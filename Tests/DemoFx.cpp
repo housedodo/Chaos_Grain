@@ -337,6 +337,66 @@ namespace
         return { 0, "A/B  4 BARS EACH", "WITH EVOLVE", { stageText[stage][0], stageText[stage][1] } };
     }
 
+    // Demo 8: CLIP - a recording (stereo, 48 kHz wav) through every engine with the current version
+    bool clipDemo = false;
+    juce::File clipFile;
+    constexpr double clipLength = 158.0, clipPause = 138.0, clipResume = 148.0;
+    const TourScene clipScenes[] = {
+        { 0.0,  0, 0.35f, 0.3f, 0.0f,  false }, { 8.0,  0, 0.35f, 0.3f, 0.6f,  false }, { 22.0, 0, 0.8f, 0.3f, 0.65f, false },
+        { 36.0, 1, 0.2f,  0.3f, 0.6f,  false }, { 48.0, 1, 0.5f,  0.3f, 0.6f,  false }, { 60.0, 1, 0.9f, 0.3f, 0.55f, false },
+        { 74.0, 2, 0.35f, 0.5f, 0.65f, false }, { 152.0, 2, 0.35f, 0.5f, 0.65f, true } };
+    const std::vector<Caption> clipCaptions = {
+        { 0.0,  "YOUR CLIP", "DRY",          { "FM - DB IN F MINOR: A DARK,", "WIDE PAD WITH A MELODY", "ON TOP. MIX 0%." } },
+        { 8.0,  "RESONATE",  "RINGS THE CHORD", { "SHAPE 35%: IT FOLLOWS THE", "CHORD (FM, DB) - NOT EVERY", "MELODY NOTE." } },
+        { 22.0, "SHAPE 80%", "BLOOM PAD",    { "LONGER RING, SUB OCTAVE AND", "SHIMMER, SWELLING ON EACH", "CHORD CHANGE." } },
+        { 36.0, "SPECTRAL",  "TUNE",         { "SHAPE 20%: THE CHORD'S NOTES", "SING, PARTIALS SWELL IN", "SMOOTHLY." } },
+        { 48.0, "SHAPE 50%", "UNISON",       { "DETUNED COPIES + OCTAVES", "AND A FIFTH: EVEN WIDER." } },
+        { 60.0, "SHAPE 90%", "RAINBOW",      { "CASCADING ECHOES; THE", "PATTERN CHANGES ONCE PER", "BAR." } },
+    };
+
+    Caption clipEvolveCaption (double t, int stage)
+    {
+        if (t >= clipResume) return { 0, "PLAY AGAIN", "FREEZE", { "IT GOES ON FROM FULL BLOOM;", "FREEZE HOLDS IT AT THE END." } };
+        if (t >= clipPause + 0.8) return { 0, "IN THE PAUSE", "ANSWERS", { "IT PLAYS BACK MOMENTS IT", "REMEMBERED: REVERSED, OCTAVE", "UP, HALF SPEED - IN KEY." } };
+        switch (stage)
+        {
+            case 0:  return { 0, "EVOLVE 1/5", "SPACE",     { "DEFAULT SHAPE: GROWS OVER", "ABOUT A MINUTE OF PLAYING.", "A CLEAR SPACE FROM THE START." } };
+            case 1:  return { 0, "EVOLVE 2/5", "RESONATE",  { "THE NOTES YOU PLAY MOST", "RING ON." } };
+            case 2:  return { 0, "EVOLVE 3/5", "ECHOES",    { "ECHOES IN YOUR TEMPO", "JOIN IN." } };
+            case 3:  return { 0, "EVOLVE 4/5", "DRONE",     { "A LOW F DRONE. F FITS BOTH", "CHORDS, SO IT STAYS; OVER DB", "ITS FIFTH (C) BECOMES AN OCTAVE." } };
+            default: return { 0, "EVOLVE 5/5", "SHIMMER",   { "OCTAVE-UP SHIMMER IN THE", "ECHOES: FULL BLOOM." } };
+        }
+    }
+
+    juce::AudioBuffer<float> makeClip()
+    {
+        juce::AudioFormatManager fm;
+        fm.registerBasicFormats();
+        std::unique_ptr<juce::AudioFormatReader> reader (fm.createReaderFor (clipFile));
+        juce::AudioBuffer<float> b (2, (int) (clipLength * sr));
+        b.clear();
+        if (reader == nullptr) return b;
+        juce::AudioBuffer<float> clip (2, (int) reader->lengthInSamples);
+        reader->read (&clip, 0, clip.getNumSamples(), 0, true, true);
+        for (int i = 0; i < b.getNumSamples(); ++i)
+        {
+            const double t = (double) i / sr;
+            if (t >= clipPause && t < clipResume) continue;
+            const int j = (t < clipPause ? i : i - (int) (clipResume * sr)) % clip.getNumSamples();
+            for (int ch = 0; ch < 2; ++ch) b.setSample (ch, i, clip.getSample (ch, j));
+        }
+        return b;
+    }
+
+    juce::String chordName (int mask, const int* notes, int n)
+    {
+        static const char* pcN[12] = { "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B" };
+        if (n <= 0) return "-";
+        const int bass = notes[0] % 12;
+        const bool minor3 = (mask >> ((bass + 3) % 12)) & 1, major3 = (mask >> ((bass + 4) % 12)) & 1;
+        return juce::String (pcN[bass]) + (minor3 && ! major3 ? "M" : "");
+    }
+
     juce::String evolveInput (double t)
     {
         static const char* names[4] = { "AM7", "FMAJ7", "CMAJ7", "G6" };
@@ -478,7 +538,7 @@ namespace
 
     const Caption& captionAt (double t)
     {
-        const auto& list = sawDemo ? sawCaptions : tourDemo ? tourCaptions : showcaseDemo ? showcaseCaptions : resonateDemo ? resonateCaptions : captions;
+        const auto& list = clipDemo ? clipCaptions : sawDemo ? sawCaptions : tourDemo ? tourCaptions : showcaseDemo ? showcaseCaptions : resonateDemo ? resonateCaptions : captions;
         const Caption* c = &list.front();
         for (auto& x : list) if (t >= x.start) c = &x;
         return *c;
@@ -497,6 +557,7 @@ namespace
         if (showcaseDemo) return makeShowcase();
         if (evolveDemo) return makeEvolve();
         if (tourDemo) return makeTour();
+        if (clipDemo) return makeClip();
         if (sawDemo) return makeSawChord (sawLength, { { 86.0, 96.0 } });
         if (compareDemo) return makeSawChord (compareLength, { { 80.0, 200.0 } });
         juce::AudioBuffer<float> b (1, (int) ((resonateDemo ? 8.0 : phrase) * sr));
@@ -535,12 +596,14 @@ int main (int argc, char** argv)
     tourDemo = argc > 2 && juce::String (argv[2]) == "tour";
     sawDemo = argc > 2 && juce::String (argv[2]) == "saw";
     compareDemo = argc > 2 && juce::String (argv[2]) == "compare";
+    clipDemo = argc > 3 && juce::String (argv[2]) == "clip";
+    if (clipDemo) clipFile = juce::File (argv[3]);
 
     const juce::File outDir (argv[1]);
     outDir.createDirectory();
     const auto videoOnly = outDir.getChildFile ("video_only.mp4");
     const auto audioFile = outDir.getChildFile ("audio.wav");
-    const auto finalFile = outDir.getChildFile (sawDemo ? "ChaosGrainFX_saw_chord.mp4" : compareDemo ? "ChaosGrainFX_with_without_evolve.mp4" : tourDemo ? "ChaosGrainFX_tour.mp4" : evolveDemo ? "ChaosGrainFX_evolve_demo.mp4" : showcaseDemo ? "ChaosGrainFX_showcase.mp4"
+    const auto finalFile = outDir.getChildFile (clipDemo ? "ChaosGrainFX_your_clip.mp4" : sawDemo ? "ChaosGrainFX_saw_chord.mp4" : compareDemo ? "ChaosGrainFX_with_without_evolve.mp4" : tourDemo ? "ChaosGrainFX_tour.mp4" : evolveDemo ? "ChaosGrainFX_evolve_demo.mp4" : showcaseDemo ? "ChaosGrainFX_showcase.mp4"
                                               : resonateDemo ? "ChaosGrainFX_resonate_demo.mp4" : "ChaosGrainFX_demo.mp4");
 
     std::unique_ptr<ChaosGrainProcessor> proc (static_cast<ChaosGrainProcessor*> (createPluginFilter()));
@@ -563,7 +626,7 @@ int main (int argc, char** argv)
     retro::ditherGradient (bgLow, bgLow.getBounds(), juce::Colour (0xff24222b), juce::Colour (0xff0d0c11), 6);
 
     const auto input = makePhrase();
-    const double duration = sawDemo ? sawLength : compareDemo ? compareLength : tourDemo ? tourLength : evolveDemo ? evolveLength : showcaseDemo ? 150.0 : resonateDemo ? 74.0 : 96.0;
+    const double duration = clipDemo ? clipLength : sawDemo ? sawLength : compareDemo ? compareLength : tourDemo ? tourLength : evolveDemo ? evolveLength : showcaseDemo ? 150.0 : resonateDemo ? 74.0 : 96.0;
     const int totalFrames = (int) (duration * fps);
     juce::AudioBuffer<float> audio (2, totalFrames * blocksPerFrame * blockSize);
     audio.clear();
@@ -596,10 +659,10 @@ int main (int argc, char** argv)
                                    : sweep (t, edge, edge + 0.15, wet ? 0.0f : 0.65f, wet ? 0.65f : 0.0f) * (t >= 80.0 || t < 8.0 ? 0.0f : 1.0f)
                                      + (t >= 80.0 ? 0.65f : 0.0f));
         }
-        else if (tourDemo || sawDemo)
+        else if (tourDemo || sawDemo || clipDemo)
         {
-            const TourScene* scenes = sawDemo ? sawScenes : tourScenes;
-            const int numScenes = sawDemo ? (int) std::size (sawScenes) : (int) std::size (tourScenes);
+            const TourScene* scenes = clipDemo ? clipScenes : sawDemo ? sawScenes : tourScenes;
+            const int numScenes = clipDemo ? (int) std::size (clipScenes) : sawDemo ? (int) std::size (sawScenes) : (int) std::size (tourScenes);
             const TourScene* sc = &scenes[0];
             const TourScene* prev = &scenes[0];
             for (int q = 0; q < numScenes; ++q) if (t >= scenes[q].t) { prev = sc; sc = &scenes[q]; }
@@ -608,8 +671,9 @@ int main (int argc, char** argv)
             setP ("chaos", sc->chaos);
             setP ("mix", sweep (t, sc->t, sc->t + 1.0, prev->engine == sc->engine ? prev->mix : sc->mix, sc->mix));
             setP ("freeze", sc->freeze ? 1.0f : 0.0f);
-            const double fadeAt = sawDemo ? sawLength - 3.0 : 172.0;
-            if (t >= fadeAt) setP ("mix", sweep (t, fadeAt, sawDemo ? sawLength : tourLength, sc->mix, 0.0f));
+            const double endAt = clipDemo ? clipLength : sawDemo ? sawLength : tourLength;
+            const double fadeAt = clipDemo ? clipLength - 4.0 : sawDemo ? sawLength - 3.0 : 172.0;
+            if (t >= fadeAt) setP ("mix", sweep (t, fadeAt, endAt, sc->mix, 0.0f));
         }
         else if (evolveDemo)
         {
@@ -671,9 +735,9 @@ int main (int argc, char** argv)
         {
             for (int i = 0; i < blockSize; ++i)
             {
-                const float s = input.getSample (0, (inPos + i) % input.getNumSamples());
-                block.setSample (0, i, s);
-                block.setSample (1, i, s);
+                const int src = (inPos + i) % input.getNumSamples();
+                block.setSample (0, i, input.getSample (0, src));
+                block.setSample (1, i, input.getSample (juce::jmin (1, input.getNumChannels() - 1), src));
             }
             inPos = (inPos + blockSize) % input.getNumSamples();
             proc->processBlock (block, midi);
@@ -695,8 +759,9 @@ int main (int argc, char** argv)
             for (int k = 1; k < 5; ++k) if (proc->evolve.uiStage[(size_t) k].load() > 0.5f) stage = k;
             const Caption evoCap = evolveCaption (t, stage);
             const Caption cmpCap = compareCaption (t, stage, proc->apvts.getRawParameterValue ("mix")->load() > 0.3f);
-            const auto& cap = compareDemo ? cmpCap : evolveDemo ? evoCap : captionAt (t);
-            if (tourDemo || sawDemo || compareDemo)   // live read-out under the caption
+            const Caption clipCap = clipEvolveCaption (t, stage);
+            const auto& cap = compareDemo ? cmpCap : evolveDemo ? evoCap : (clipDemo && t >= 74.0) ? clipCap : captionAt (t);
+            if (tourDemo || sawDemo || compareDemo || clipDemo)   // live read-out under the caption
             {
                 static const char* pcN[12] = { "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B" };
                 auto pct = [&] (const char* id) { return juce::String (juce::roundToInt (proc->apvts.getRawParameterValue (id)->load() * 100.0f)) + "%"; };
@@ -735,6 +800,12 @@ int main (int argc, char** argv)
                                   { cx, 372, cw, 20 }, retro::pal::yellow, juce::Justification::topLeft, 2);
             }
             else if (tourDemo) playing = tourInput (t);
+            else if (clipDemo)
+            {
+                int cn[8]; const int c = proc->keyDetector.getChord (cn);
+                playing = (t >= clipPause && t < clipResume) ? juce::String ("- (PAUSE)")
+                        : "YOUR CLIP   CHORD " + chordName (proc->keyDetector.chordPitchClasses(), cn, c);
+            }
             else if (sawDemo || compareDemo)
             {
                 const bool pausedNow = sawDemo ? (t >= 86.0 && t < 96.0) : t >= 80.0;
