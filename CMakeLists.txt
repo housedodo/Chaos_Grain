@@ -156,4 +156,11 @@ if(CHAOSGRAIN_TESTS)
     target_include_directories(HoistDemo PRIVATE $<TARGET_PROPERTY:Hoist,INCLUDE_DIRECTORIES>)
     target_compile_definitions(HoistDemo PRIVATE $<TARGET_PROPERTY:Hoist,COMPILE_DEFINITIONS>)
     target_link_libraries(HoistDemo PRIVATE Hoist)
+
+    # Soundtrack kit from one recording: stage loops, ambience, MIDI, demo video
+    juce_add_console_app(HoistSoundtrack)
+    target_sources(HoistSoundtrack PRIVATE Tests/HoistSoundtrack.cpp)
+    target_include_directories(HoistSoundtrack PRIVATE $<TARGET_PROPERTY:Hoist,INCLUDE_DIRECTORIES>)
+    target_compile_definitions(HoistSoundtrack PRIVATE $<TARGET_PROPERTY:Hoist,COMPILE_DEFINITIONS>)
+    target_link_libraries(HoistSoundtrack PRIVATE Hoist)
 endif()
