@@ -5,6 +5,9 @@
 // Usage:
 //   HoistSoundtrack <clip48k.wav> <outdir> stems   -> music_1..5.wav, amb_1..5.wav, *.mid, mix wav
 //   HoistSoundtrack <clip48k.wav> <outdir> video   -> Hoist_soundtrack_demo.mp4   (needs ffmpeg + display)
+//   add "basslp" after the mode: a gentle low-pass on the bass in stages 1-2 so it sits under the tune
+//   HoistSoundtrack - <outdir> gameamb             -> amb_1..5.wav for the game (38.8 s, only what the game does not
+//                                                     already play: the deep rumble and the howling wind)
 #include <juce_audio_processors/juce_audio_processors.h>
 #include <juce_audio_formats/juce_audio_formats.h>
 #include "../Source/Hoist/HoistProcessor.h"
@@ -33,6 +36,20 @@ namespace
     const char* trackName[numTracks] = { "CLIP", "PLUCK", "BASS", "SQUEEZEBOX", "DRUMS", "BELL", "SEA", "GULLS", "CREAKS", "RAIN+WIND", "DEEP" };
 
     juce::Random rnd (2024);
+
+    // the bass in the first two stages: a gentle 12 dB/oct low-pass so it stays under the tune
+    bool bassLowpass = false;
+    const float bassCut[5] = { 450.0f, 450.0f, 0.0f, 0.0f, 0.0f };
+    void lowPass2 (juce::AudioBuffer<float>& b, float cut)
+    {
+        const float a = 1.0f - std::exp (-6.2831853f * cut / (float) sr);
+        for (int ch = 0; ch < b.getNumChannels(); ++ch)
+        {
+            float s1 = 0, s2 = 0;
+            auto* d = b.getWritePointer (ch);
+            for (int i = 0; i < b.getNumSamples(); ++i) { s1 += a * (d[i] - s1); s2 += a * (s1 - s2); d[i] = s2; }
+        }
+    }
     void add (Buf& b, double t, float l, float r) { const int i = (int) std::lround (t * sr); if (i >= 0 && i < b.getNumSamples()) { b.addSample (0, i, l); b.addSample (1, i, r); } }
     void addMono (Buf& b, double t, float v, float pan = 0.5f) { add (b, t, v * std::cos (pan * 1.5708f), v * std::sin (pan * 1.5708f)); }
 
@@ -193,7 +210,7 @@ namespace
             if (rnd.nextFloat() < 1.0f / (float) (sr * 1.5)) gustT = rnd.nextFloat();
             gust += (gustT - gust) * 0.00005f;
             // wind: band-passed noise with a moving centre (howling when `howl`)
-            const float fc = 250.0f + 700.0f * gust + 300.0f * howl * std::sin (twoPi * 0.07f * tt);
+            const float fc = juce::jmax (90.0f, 250.0f + 700.0f * gust + 300.0f * howl * std::sin (twoPi * 0.07f * tt));   // never <= 0: the filter would blow up
             const float q = 1.5f + 8.0f * howl;
             const float w = twoPi * fc / (float) sr, al = std::sin (w) / (2.0f * q);
             const float y = (al * wn - (-2 * std::cos (w)) * wbp1 - (1 - al) * wbp2) / (1 + al);
@@ -434,6 +451,7 @@ static int renderStems (const Buf& clip, const juce::File& dir)
         Midi midi;
         for (int k = 0; k < 3; ++k) arrange (tr, clip, s, k * L, k == 1 ? &midi : nullptr);
         ambience (tr, s, 0.0, 3.0 * L);
+        if (bassLowpass && bassCut[s] > 0.0f) lowPass2 (tr[tBass], bassCut[s]);
         Buf music (2, loopLen * 3 + block), amb (2, loopLen * 3 + block);
         music.clear(); amb.clear();
         for (int t = 0; t < numTracks; ++t)
@@ -618,10 +636,38 @@ static int renderVideo (const Buf& clip, const juce::File& dir)
     return rc;
 }
 
+// ------------------------------------------------------------------ ambience for the game: one owner per sound
+// The game already plays the sea bed (and darkens it with dread), gulls, rain, the weather wind, creaks (its own
+// creak one-shot) and whisper one-shots, and HOIST puts its own wind and whispers on the music bus. These loops keep
+// only what nothing else plays: the deep rumble (stages 3-5) and the howl (4-5). Stages 1-2 are silent on purpose.
+static int renderGameAmb (const juce::File& dir)
+{
+    dir.createDirectory();
+    constexpr int loops = 4;   // 38.8 s, so the gusts do not repeat every 9.7 s
+    const int len = (int) std::lround (loops * L * sr), xf = (int) (0.5 * sr);
+    const float wind[5] = { 0, 0, 0, 0.1f, 0.3f }, howl[5] = { 0, 0, 0, 0.5f, 1.0f }, rumble[5] = { 0, 0, 0.15f, 0.5f, 0.6f };
+    for (int s = 0; s < numStages; ++s)
+    {
+        rnd.setSeed (77 + s);
+        Buf amb (2, len * 2 + xf + 1);
+        amb.clear();
+        const double T = 2.0 * loops * L + 1.0;
+        if (wind[s] > 0) weather (amb, 0.0, T, 0.0f, wind[s], howl[s]);
+        if (rumble[s] > 0) deep (amb, 0.0, T, rumble[s], 0.0f);
+        amb.applyGain (ambGain[s]);
+        highPass35 (amb);
+        writeWav (dir.getChildFile ("amb_" + juce::String (s + 1) + ".wav"), seamless (amb, len / 2, len, xf));
+        std::printf ("stage %d: game ambience (%.1f s) written\n", s + 1, loops * L);
+    }
+    return 0;
+}
+
 int main (int argc, char** argv)
 {
     juce::ScopedJuceInitialiser_GUI init;
-    if (argc < 4) { std::puts ("usage: HoistSoundtrack <clip48k.wav> <outdir> stems|video"); return 2; }
+    if (argc < 4) { std::puts ("usage: HoistSoundtrack <clip48k.wav> <outdir> stems|video [basslp]  |  HoistSoundtrack - <outdir> gameamb"); return 2; }
+    if (juce::String (argv[3]) == "gameamb") return renderGameAmb (juce::File (argv[2]));
+    bassLowpass = argc > 4 && juce::String (argv[4]) == "basslp";
     const auto clip = loadClip (juce::File (argv[1]));
     const juce::File dir (argv[2]);
     return juce::String (argv[3]) == "video" ? renderVideo (clip, dir) : renderStems (clip, dir);
