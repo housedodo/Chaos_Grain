@@ -397,6 +397,87 @@ namespace
         return juce::String (pcN[bass]) + (minor3 && ! major3 ? "M" : "");
     }
 
+    // Demo 9: SEND - keys (dry) + kick, EVOLVE on a send track (MIX 100%) ducked by the kick
+    bool sendDemo = false;
+    constexpr double sendLength = 100.0;
+    juce::AudioBuffer<float> sendKick;                 // the kick track (not fed to the plugin)
+    bool sendKeysOn (double t) { return t < 72.0 || (t >= 80.0 && t < 96.0); }
+    float sendLevel (double t) { return t < 8.0 ? 0.0f : t < 9.0 ? (float) (t - 8.0) * 0.9f : 0.9f; }
+    bool sendSidechain (double t) { return (t >= 40.0 && t < 56.0) || t >= 64.0; }
+    const std::vector<Caption> sendCaptions = {
+        { 0.0,  "",             "DRY + KICK",     { "KEYS (AM7 - FMAJ7 - CMAJ7 -", "G6) AND A KICK. THE SEND", "IS STILL DOWN." } },
+        { 8.0,  "SEND UP",      "EVOLVE ON A SEND", { "CHAOSGRAIN FX ON A SEND", "TRACK, MIX 100%: THE SEND", "LEVEL SETS THE AMOUNT." } },
+        { 22.0, "NO SIDECHAIN", "WASH",           { "IT GROWS - AND THE PAD", "WASHES OVER THE KICK." } },
+        { 40.0, "SIDECHAIN ON", "PUMP",           { "THE SEND DUCKS ON EVERY", "KICK (~-12 DB) AND SWELLS", "BACK: CLEAR KICK, BREATHING PAD." } },
+        { 56.0, "A/B",          "SIDECHAIN OFF",  { "4 BARS WITHOUT..." } },
+        { 64.0, "A/B",          "SIDECHAIN ON",   { "...AND BACK ON. A SHORT", "MELODY BEFORE THE BREAK." } },
+        { 72.0, "BREAK",        "ANSWERS",        { "KEYS AND KICK STOP. ONLY THE", "SEND PLAYS: EVOLVE ANSWERS", "WITH WHAT IT REMEMBERED." } },
+        { 80.0, "DROP",         "FROZEN SEND",    { "FREEZE ON THE SEND: THE BLOOM", "HOLDS AND THE KICK PUMPS IT.", "THE KEYS PLAY ON, DRY." } },
+        { 96.0, "",             "THE CHAIN",      { "KEYS -> SEND: CHAOSGRAIN FX", "(EVOLVE, MIX 100%) -> EQ ->", "SIDECHAIN COMPRESSOR (KICK)" } },
+    };
+    float meterKeys = 0.0f, meterKick = 0.0f, meterSend = 0.0f, meterGr = 0.0f;
+    std::array<float, 4> sendHpState {};
+
+    juce::AudioBuffer<float> makeSend()
+    {
+        juce::AudioBuffer<float> b (1, (int) (sendLength * sr));
+        b.clear();
+        sendKick.setSize (1, b.getNumSamples());
+        sendKick.clear();
+        juce::Random rnd (5);
+        auto ep = [&] (const std::vector<int>& notes, double t0, double dur, float gain)
+        {
+            for (int m : notes)
+            {
+                const float f = midiHz (m);
+                for (int i = 0; i < (int) ((dur + 0.3) * sr) && (int) (t0 * sr) + i < b.getNumSamples(); ++i)
+                {
+                    const float tt = (float) i / (float) sr;
+                    const float idx = 1.6f * std::exp (-tt / 0.12f) + 0.25f;
+                    const float v = std::sin (twoPi * f * tt + idx * std::sin (twoPi * f * tt));
+                    const float env = std::exp (-tt / 1.1f) * (tt < dur ? 1.0f : std::exp (-(tt - (float) dur) / 0.08f));
+                    b.addSample (0, (int) (t0 * sr) + i, gain * v * env * (1.0f + 0.15f * std::sin (twoPi * 5.0f * tt)));
+                }
+            }
+        };
+        auto pluck = [&] (int m, double t0, double dur, float gain)
+        {
+            const int period = juce::jmax (2, (int) std::lround (sr / midiHz (m)));
+            std::vector<float> line ((size_t) period);
+            for (auto& v : line) v = rnd.nextFloat() * 2.0f - 1.0f;
+            int idx = 0; float prev = 0.0f;
+            for (int i = 0; i < (int) (dur * sr) && (int) (t0 * sr) + i < b.getNumSamples(); ++i)
+            {
+                const float y = line[(size_t) idx];
+                line[(size_t) idx] = 0.5f * (y + prev) * 0.996f;
+                prev = y;
+                if (++idx >= period) idx = 0;
+                b.addSample (0, (int) (t0 * sr) + i, gain * y * juce::jmin (1.0f, (float) i / 40.0f));
+            }
+        };
+        const std::vector<std::vector<int>> chords = { { 45, 55, 60, 64 }, { 41, 52, 57, 60 }, { 48, 55, 59, 64 }, { 43, 52, 55, 59 } };
+        for (double t0 = 0.0; t0 < sendLength - 4.0; t0 += 2.0)
+        {
+            if (! sendKeysOn (t0)) continue;
+            const auto& c = chords[(size_t) ((int) (t0 / 2.0) % 4)];
+            ep (c, t0, 0.9, 0.07f);
+            ep ({ c[2], c[3] }, t0 + 1.0, 0.5, 0.07f);
+        }
+        const int melody[] = { 69, 72, 76, 74, 72, 71, 69, 67, 69, 72, 74, 76 };   // A minor line before the break
+        for (int k = 0; k < 12; ++k) pluck (melody[k], 66.0 + k * 0.5, 0.9, 0.2f);
+        for (double t0 = 0.0; t0 < sendLength - 4.0; t0 += 0.5)               // four on the floor
+        {
+            if (! sendKeysOn (t0)) continue;
+            for (int i = 0; i < (int) (0.4 * sr); ++i)
+            {
+                const float tt = (float) i / (float) sr;
+                const float ph = twoPi * (50.0f * tt + 100.0f * 0.03f * (1.0f - std::exp (-tt / 0.03f)));
+                sendKick.addSample (0, (int) (t0 * sr) + i, 0.3f * std::sin (ph) * std::exp (-tt / 0.22f));
+            }
+        }
+        return b;
+    }
+
     juce::String evolveInput (double t)
     {
         static const char* names[4] = { "AM7", "FMAJ7", "CMAJ7", "G6" };
@@ -538,7 +619,7 @@ namespace
 
     const Caption& captionAt (double t)
     {
-        const auto& list = clipDemo ? clipCaptions : sawDemo ? sawCaptions : tourDemo ? tourCaptions : showcaseDemo ? showcaseCaptions : resonateDemo ? resonateCaptions : captions;
+        const auto& list = sendDemo ? sendCaptions : clipDemo ? clipCaptions : sawDemo ? sawCaptions : tourDemo ? tourCaptions : showcaseDemo ? showcaseCaptions : resonateDemo ? resonateCaptions : captions;
         const Caption* c = &list.front();
         for (auto& x : list) if (t >= x.start) c = &x;
         return *c;
@@ -558,6 +639,7 @@ namespace
         if (evolveDemo) return makeEvolve();
         if (tourDemo) return makeTour();
         if (clipDemo) return makeClip();
+        if (sendDemo) return makeSend();
         if (sawDemo) return makeSawChord (sawLength, { { 86.0, 96.0 } });
         if (compareDemo) return makeSawChord (compareLength, { { 80.0, 200.0 } });
         juce::AudioBuffer<float> b (1, (int) ((resonateDemo ? 8.0 : phrase) * sr));
@@ -597,13 +679,14 @@ int main (int argc, char** argv)
     sawDemo = argc > 2 && juce::String (argv[2]) == "saw";
     compareDemo = argc > 2 && juce::String (argv[2]) == "compare";
     clipDemo = argc > 3 && juce::String (argv[2]) == "clip";
+    sendDemo = argc > 2 && juce::String (argv[2]) == "send";
     if (clipDemo) clipFile = juce::File (argv[3]);
 
     const juce::File outDir (argv[1]);
     outDir.createDirectory();
     const auto videoOnly = outDir.getChildFile ("video_only.mp4");
     const auto audioFile = outDir.getChildFile ("audio.wav");
-    const auto finalFile = outDir.getChildFile (clipDemo ? "ChaosGrainFX_your_clip.mp4" : sawDemo ? "ChaosGrainFX_saw_chord.mp4" : compareDemo ? "ChaosGrainFX_with_without_evolve.mp4" : tourDemo ? "ChaosGrainFX_tour.mp4" : evolveDemo ? "ChaosGrainFX_evolve_demo.mp4" : showcaseDemo ? "ChaosGrainFX_showcase.mp4"
+    const auto finalFile = outDir.getChildFile (sendDemo ? "ChaosGrainFX_evolve_send_sidechain.mp4" : clipDemo ? "ChaosGrainFX_your_clip.mp4" : sawDemo ? "ChaosGrainFX_saw_chord.mp4" : compareDemo ? "ChaosGrainFX_with_without_evolve.mp4" : tourDemo ? "ChaosGrainFX_tour.mp4" : evolveDemo ? "ChaosGrainFX_evolve_demo.mp4" : showcaseDemo ? "ChaosGrainFX_showcase.mp4"
                                               : resonateDemo ? "ChaosGrainFX_resonate_demo.mp4" : "ChaosGrainFX_demo.mp4");
 
     std::unique_ptr<ChaosGrainProcessor> proc (static_cast<ChaosGrainProcessor*> (createPluginFilter()));
@@ -626,7 +709,7 @@ int main (int argc, char** argv)
     retro::ditherGradient (bgLow, bgLow.getBounds(), juce::Colour (0xff24222b), juce::Colour (0xff0d0c11), 6);
 
     const auto input = makePhrase();
-    const double duration = clipDemo ? clipLength : sawDemo ? sawLength : compareDemo ? compareLength : tourDemo ? tourLength : evolveDemo ? evolveLength : showcaseDemo ? 150.0 : resonateDemo ? 74.0 : 96.0;
+    const double duration = sendDemo ? sendLength : clipDemo ? clipLength : sawDemo ? sawLength : compareDemo ? compareLength : tourDemo ? tourLength : evolveDemo ? evolveLength : showcaseDemo ? 150.0 : resonateDemo ? 74.0 : 96.0;
     const int totalFrames = (int) (duration * fps);
     juce::AudioBuffer<float> audio (2, totalFrames * blocksPerFrame * blockSize);
     audio.clear();
@@ -648,7 +731,12 @@ int main (int argc, char** argv)
         const double t = (double) f / fps;
 
  // ---------------- Script ----------------
-        if (compareDemo)
+        if (sendDemo)
+        {
+            setP ("engine", 2.0f); setP ("shape", 0.5f); setP ("chaos", 0.5f); setP ("mix", 1.0f);   // a send: 100% wet
+            setP ("freeze", t >= 80.0 && t < 96.0 ? 1.0f : 0.0f);
+        }
+        else if (compareDemo)
         {
             // A/B every 4 bars (8 s): dry, then with EVOLVE (default settings); EVOLVE keeps
             // processing (and growing) underneath while MIX is at 0
@@ -740,9 +828,53 @@ int main (int argc, char** argv)
                 block.setSample (1, i, input.getSample (juce::jmin (1, input.getNumChannels() - 1), src));
             }
             inPos = (inPos + blockSize) % input.getNumSamples();
-            proc->processBlock (block, midi);
-            for (int ch = 0; ch < 2; ++ch)
-                audio.copyFrom (ch, frameStart + b * blockSize, block, ch, 0, blockSize);
+            if (sendDemo)
+            {
+                // dry keys + kick on their own tracks; the plugin's output is the send (ducked by the kick)
+                juce::AudioBuffer<float> dry (block);
+                proc->processBlock (block, midi);
+                const int base = frameStart + b * blockSize;
+                float pk = 0.0f, pd = 0.0f, ps = 0.0f, grMax = 0.0f;
+                for (int i = 0; i < blockSize; ++i)
+                {
+                    const double ts = (double) (base + i) / sr;
+                    // sidechain: duck on every kick (5 ms attack, ~160 ms release), ~-12 dB
+                    float duck = 1.0f;
+                    if (sendSidechain (ts) && sendKeysOn (ts))
+                    {
+                        const double since = std::fmod (ts, 0.5);
+                        const float env = since < 0.005 ? (float) (since / 0.005) : std::exp (-(float) (since - 0.005) / 0.16f);
+                        duck = 1.0f - 0.75f * env;
+                    }
+                    grMax = juce::jmax (grMax, -juce::Decibels::gainToDecibels (duck));
+                    const float fade = ts > sendLength - 4.0 ? (float) ((sendLength - ts) / 4.0) : 1.0f;
+                    const float kick = (base + i) < sendKick.getNumSamples() ? sendKick.getSample (0, base + i) : 0.0f;
+                    for (int ch = 0; ch < 2; ++ch)
+                    {
+                        // EQ on the send: high-pass ~120 Hz (two one-poles) so the pad leaves room for the kick
+                        float wv = block.getSample (ch, i);
+                        for (int st = 0; st < 2; ++st)
+                        {
+                            float& lp = sendHpState[(size_t) (ch * 2 + st)];
+                            lp += (wv - lp) * 0.0156f;   // 1 - exp(-2 pi 120 / 48000)
+                            wv -= lp;
+                        }
+                        const float wet = wv * sendLevel (ts) * 3.2f * duck;
+                        const float mixd = (0.7f * dry.getSample (ch, i) + kick + wet) * fade;
+                        audio.setSample (ch, base + i, std::tanh (mixd * 1.1f) / 1.1f);
+                        ps = juce::jmax (ps, std::abs (wet));
+                    }
+                    pk = juce::jmax (pk, std::abs (kick)); pd = juce::jmax (pd, std::abs (dry.getSample (0, i)));
+                }
+                meterKeys = juce::jmax (pd, meterKeys * 0.8f); meterKick = juce::jmax (pk, meterKick * 0.8f);
+                meterSend = juce::jmax (ps, meterSend * 0.8f); meterGr = juce::jmax (grMax, meterGr * 0.7f);
+            }
+            else
+            {
+                proc->processBlock (block, midi);
+                for (int ch = 0; ch < 2; ++ch)
+                    audio.copyFrom (ch, frameStart + b * blockSize, block, ch, 0, blockSize);
+            }
         }
 
         // ---------------- Video ----------------
@@ -761,7 +893,7 @@ int main (int argc, char** argv)
             const Caption cmpCap = compareCaption (t, stage, proc->apvts.getRawParameterValue ("mix")->load() > 0.3f);
             const Caption clipCap = clipEvolveCaption (t, stage);
             const auto& cap = compareDemo ? cmpCap : evolveDemo ? evoCap : (clipDemo && t >= 74.0) ? clipCap : captionAt (t);
-            if (tourDemo || sawDemo || compareDemo || clipDemo)   // live read-out under the caption
+            if (tourDemo || sawDemo || compareDemo || clipDemo || sendDemo)   // live read-out under the caption
             {
                 static const char* pcN[12] = { "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B" };
                 auto pct = [&] (const char* id) { return juce::String (juce::roundToInt (proc->apvts.getRawParameterValue (id)->load() * 100.0f)) + "%"; };
@@ -800,6 +932,12 @@ int main (int argc, char** argv)
                                   { cx, 372, cw, 20 }, retro::pal::yellow, juce::Justification::topLeft, 2);
             }
             else if (tourDemo) playing = tourInput (t);
+            else if (sendDemo)
+            {
+                static const char* names[4] = { "AM7", "FMAJ7", "CMAJ7", "G6" };
+                playing = t >= 66.0 && t < 72.0 ? juce::String ("KEYS + MELODY") : sendKeysOn (t) ? juce::String ("KEYS ") + names[(int) (t / 2.0) % 4] + " + KICK"
+                                                                                      : juce::String ("- (BREAK)");
+            }
             else if (clipDemo)
             {
                 int cn[8]; const int c = proc->keyDetector.getChord (cn);
@@ -826,6 +964,35 @@ int main (int argc, char** argv)
             retro::pixelText (g, "INPUT", { cx, 420, 200, 20 }, retro::pal::dim, juce::Justification::topLeft, 2);
             retro::pixelText (g, playing, { cx + 84, 420, cw - 84, 20 }, retro::pal::cyan, juce::Justification::topLeft, 2);
 
+            if (sendDemo)   // mini mixer: three tracks, the send level and the sidechain's gain reduction
+            {
+                const int top = 470, mh = 150;
+                auto meterH = [&] (float pk) { return (int) (juce::jlimit (0.0f, 1.0f, (juce::Decibels::gainToDecibels (pk, -60.0f) + 48.0f) / 48.0f) * (float) mh); };
+                struct Strip { const char* name; float pk; juce::Colour col; };
+                const Strip strips[3] = { { "KEYS", meterKeys, retro::pal::cyan }, { "KICK", meterKick, retro::pal::yellow }, { "SEND", meterSend, retro::pal::magenta } };
+                for (int k = 0; k < 3; ++k)
+                {
+                    const int x = cx + k * 150;
+                    g.setColour (juce::Colour (0xff15141b)); g.fillRect (x, top, 120, mh + 40);
+                    g.setColour (juce::Colour (0xff2a2833)); g.fillRect (x + 20, top + 30, 24, mh);
+                    const int h = meterH (strips[k].pk);
+                    for (int yy = 0; yy < h; yy += 4) { g.setColour (strips[k].col); g.fillRect (x + 20, top + 30 + mh - yy - 3, 24, 3); }
+                    retro::pixelText (g, strips[k].name, { x + 6, top + 6, 110, 20 }, retro::pal::text, juce::Justification::topLeft, 2);
+                }
+                // send fader + sidechain gain reduction on the send strip
+                const int sx = cx + 300;
+                const float lvl = sendLevel (t);
+                g.setColour (juce::Colour (0xff2a2833)); g.fillRect (sx + 60, top + 30, 6, mh);
+                g.setColour (retro::pal::text); g.fillRect (sx + 52, top + 30 + (int) ((1.0f - lvl) * (float) (mh - 8)), 22, 8);
+                const bool sc = sendSidechain (t) && sendKeysOn (t);
+                g.setColour (juce::Colour (0xff2a2833)); g.fillRect (sx + 90, top + 30, 14, mh);
+                const int grH = (int) (juce::jlimit (0.0f, 1.0f, meterGr / 18.0f) * (float) mh);
+                g.setColour (juce::Colour (0xffff7043)); g.fillRect (sx + 90, top + 30, 14, grH);
+                retro::pixelText (g, sc ? "SIDECHAIN ON  -" + juce::String (juce::roundToInt (meterGr)) + " DB" : juce::String ("SIDECHAIN OFF"),
+                                  { cx, top + mh + 46, 500, 20 }, sc ? retro::pal::yellow : retro::pal::dim, juce::Justification::topLeft, 2);
+            }
+            else
+            {
             // Output scope
             const juce::Rectangle<int> scope (cx, 490, juce::jmin (cw, 520), 120);
             juce::Image sc (juce::Image::RGB, scope.getWidth() / 4, scope.getHeight() / 4, false);
@@ -849,6 +1016,7 @@ int main (int argc, char** argv)
             }
             retro::blitLowRes (g, sc, scope.getX(), scope.getY(), 4);
             retro::pixelText (g, "OUTPUT", { scope.getX(), scope.getY() - 24, 200, 20 }, retro::pal::dim, juce::Justification::topLeft, 2);
+            }
         }
 
         {
