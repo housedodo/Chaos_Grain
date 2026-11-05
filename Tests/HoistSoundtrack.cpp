@@ -48,6 +48,24 @@ namespace
 
     juce::Random rnd (2024);
 
+    // MIDI by instrument (the sample pack's instruments): while gCap is set every note any instrument plays is written down,
+    // with a velocity that carries the game's level (sfz: gain = (vel/127)^2, relative to the loudest use of that sound)
+    enum Inst { iPluck, iStab, iSqueeze, iBass, iBell, iDrone, iDrums, iBellBent, iBellLow, numInst };
+    const char* instName[numInst] = { "pluck", "pluck_stab", "squeezebox", "bass", "bell", "subdrone", "drums", "bell_bent", "bell_low" };
+    struct InstMidi { std::vector<juce::MidiMessage> ev[numInst]; };
+    InstMidi* gCap = nullptr;
+    double gCapFrom = 0.0;   // time of the captured pass's start
+    void capNote (int inst, int note, double t, double len, float gain, float ref, int pitchBend = 8192)
+    {
+        if (! gCap) return;
+        const int ch = inst == iDrums ? 10 : 1;
+        const auto vel = (juce::uint8) juce::jlimit (1, 127, (int) std::lround (127.0 * std::sqrt (juce::jmax (0.0f, gain / ref))));
+        auto& v = gCap->ev[inst];
+        if (inst == iBell || inst == iBellBent || inst == iBellLow) v.push_back (juce::MidiMessage::pitchWheel (ch, pitchBend).withTimeStamp (juce::jmax (0.0, t - gCapFrom - 0.001)));   // each bell sets its own bend (it rings on)
+        v.push_back (juce::MidiMessage::noteOn (ch, note, vel).withTimeStamp (t - gCapFrom));
+        v.push_back (juce::MidiMessage::noteOff (ch, note).withTimeStamp (t - gCapFrom + len));
+    }
+
     // the bass in the first two stages: a gentle 12 dB/oct low-pass so it stays under the tune
     bool bassLowpass = false;
     const float bassCut[5] = { 450.0f, 450.0f, 0.0f, 0.0f, 0.0f };
@@ -61,12 +79,23 @@ namespace
             for (int i = 0; i < b.getNumSamples(); ++i) { s1 += a * (d[i] - s1); s2 += a * (s1 - s2); d[i] = s2; }
         }
     }
-    void add (Buf& b, double t, float l, float r) { const int i = (int) std::lround (t * sr); if (i >= 0 && i < b.getNumSamples()) { b.addSample (0, i, l); b.addSample (1, i, r); } }
+    // stems by instrument: while an instrument plays, everything it adds is copied into gOut[that instrument] too
+    int gInst = -1;
+    Buf* gOut[numInst] = {};
+    struct InstScope { int prev; explicit InstScope (int i) : prev (gInst) { if (gInst < 0) gInst = i; } ~InstScope() { gInst = prev; } };
+    void add (Buf& b, double t, float l, float r)
+    {
+        const int i = (int) std::lround (t * sr);
+        if (i >= 0 && i < b.getNumSamples()) { b.addSample (0, i, l); b.addSample (1, i, r); }
+        if (gInst >= 0 && gOut[gInst] && i >= 0 && i < gOut[gInst]->getNumSamples()) { gOut[gInst]->addSample (0, i, l); gOut[gInst]->addSample (1, i, r); }
+    }
     void addMono (Buf& b, double t, float v, float pan = 0.5f) { add (b, t, v * std::cos (pan * 1.5708f), v * std::sin (pan * 1.5708f)); }
 
     // ---------------------------------------------------------------- instruments
     void pluck (Buf& b, float m, double t0, double dur, float gain, float pan, float bright = 0.996f, std::vector<juce::MidiMessage>* midi = nullptr)
     {
+        if (bright <= 0.991f) capNote (iStab, (int) m, t0, dur * 0.9, gain, 0.07f); else capNote (iPluck, (int) m, t0, dur * 0.9, gain, 0.2f);
+        InstScope scope (bright <= 0.991f ? iStab : iPluck);
         const int period = juce::jmax (2, (int) std::lround (sr / hz (m)));
         std::vector<float> line ((size_t) period);
         for (auto& v : line) v = rnd.nextFloat() * 2.0f - 1.0f;
@@ -84,6 +113,8 @@ namespace
     }
     void squeeze (Buf& b, float m, double t0, double dur, float gain, float pan, std::vector<juce::MidiMessage>* midi = nullptr)
     {
+        capNote (iSqueeze, (int) m, t0, dur, gain, 0.03f);
+        InstScope scope (iSqueeze);
         const float f = hz (m);
         float p1 = 0, p2 = 0.37f;
         for (int i = 0; i < (int) (dur * sr); ++i)
@@ -99,7 +130,9 @@ namespace
     }
     void bass (Buf& b, float m, double t0, double dur, float gain, std::vector<juce::MidiMessage>* midi = nullptr)
     {
-        pluck (b, m, t0, dur, gain * 0.7f, 0.5f, 0.998f);
+        capNote (iBass, (int) m, t0, dur, gain, 0.35f);
+        InstScope scope (iBass);
+        { auto* c = gCap; gCap = nullptr; pluck (b, m, t0, dur, gain * 0.7f, 0.5f, 0.998f); gCap = c; }   // (the bass's own string, not a pluck note)
         const float f = hz (m);
         for (int i = 0; i < (int) (dur * sr); ++i)
         {
@@ -110,6 +143,8 @@ namespace
     }
     void subDrone (Buf& b, float m, double t0, double dur, float gain)
     {
+        capNote (iDrone, (int) m, t0, dur, gain, 0.12f);
+        InstScope scope (iDrone);
         const float f = hz (m);
         for (int i = 0; i < (int) (dur * sr); ++i)
         {
@@ -120,6 +155,8 @@ namespace
     }
     void drum (Buf& b, double t0, float gain, float pan = 0.5f, std::vector<juce::MidiMessage>* midi = nullptr, int note = 45)
     {
+        capNote (iDrums, note, t0, 0.1, gain, 0.45f);
+        InstScope scope (iDrums);
         float ph = 0, lp = 0;
         for (int i = 0; i < (int) (0.5 * sr); ++i)
         {
@@ -132,6 +169,8 @@ namespace
     }
     void shaker (Buf& b, double t0, float gain, std::vector<juce::MidiMessage>* midi = nullptr)
     {
+        capNote (iDrums, 70, t0, 0.05, gain, 0.08f);
+        InstScope scope (iDrums);
         float hp = 0;
         for (int i = 0; i < (int) (0.07 * sr); ++i)
         {
@@ -143,6 +182,9 @@ namespace
     }
     void bell (Buf& b, float m, double t0, float gain, float pan, float detuneCents = 0.0f, float decay = 4.0f)
     {
+        const int bi = decay >= 8.0f ? iBellLow : decay >= 5.0f ? iBellBent : iBell;   // the longer, darker bells of stages 3 and 5
+        capNote (bi, (int) m, t0, 0.5, gain, 0.06f, juce::jlimit (0, 16383, 8192 + (int) std::lround (detuneCents / 200.0 * 8192)));   // detune as pitch bend (+-2 semitones)
+        InstScope scope (bi);
         const float f = hz (m) * std::pow (2.0f, detuneCents / 1200.0f);
         const float ratio[6] = { 0.5f, 1.0f, 1.19f, 1.56f, 2.0f, 2.74f }, amp[6] = { 0.5f, 1.0f, 0.5f, 0.4f, 0.35f, 0.2f };
         for (int i = 0; i < (int) (decay * 1.5 * sr); ++i)
@@ -481,6 +523,25 @@ namespace
     }
 }
 
+// stems by instrument (dry, as the game's instruments play them before HOIST; the middle pass, wrapped seamless)
+const juce::File* gStemsDir = nullptr;
+static void writeStemSet (const juce::File& dir, const juce::String& piece, int loopLen, int xf, int bassLowpassStage = -1)
+{
+    dir.createDirectory();
+    for (int k = 0; k < numInst; ++k)
+    {
+        if (! gOut[k]) continue;
+        if (k == iBass && bassLowpassStage >= 0 && bassLowpass && bassCut[bassLowpassStage] > 0.0f) lowPass2 (*gOut[k], bassCut[bassLowpassStage]);
+        if (gOut[k]->getMagnitude (0, gOut[k]->getNumSamples()) > 1.0e-6f) writeWav (dir.getChildFile (piece + "_" + instName[k] + ".wav"), seamless (*gOut[k], loopLen, loopLen, xf));
+        gOut[k] = nullptr;
+    }
+}
+static void writeInstStems (int s, int loopLen, int xf)
+{
+    const juce::String piece = "stage" + juce::String (s + 1);
+    writeStemSet (gStemsDir->getChildFile (piece), piece, loopLen, xf, s);
+}
+
 // ------------------------------------------------------------------ stems: music_N / amb_N loops + MIDI
 static int renderStems (const Buf& clip, const juce::File& dir)
 {
@@ -492,11 +553,14 @@ static int renderStems (const Buf& clip, const juce::File& dir)
         // three loops of the arrangement through HOIST; keep the middle one (tails included), seamless
         std::array<Buf, numTracks> tr;
         for (auto& b : tr) { b.setSize (2, loopLen * 3 + block); b.clear(); }
+        std::array<Buf, numInst> stems;
+        if (gStemsDir) for (int k = 0; k < numInst; ++k) { stems[(size_t) k].setSize (2, loopLen * 3 + block); stems[(size_t) k].clear(); gOut[k] = &stems[(size_t) k]; }
         Midi midi;
         for (int k = 0; k < 3; ++k)
             for (int r = 0; r < reps; ++r) arrange (tr, clip, s, (k * reps + r) * L, k == 1 ? &midi : nullptr, r);
         ambience (tr, s, 0.0, 3.0 * loopSec);
         if (bassLowpass && bassCut[s] > 0.0f) lowPass2 (tr[tBass], bassCut[s]);
+        if (gStemsDir) writeInstStems (s, loopLen, xf);
         Buf music (2, loopLen * 3 + block), amb (2, loopLen * 3 + block);
         music.clear(); amb.clear();
         for (int t = 0; t < numTracks; ++t)
@@ -722,6 +786,8 @@ namespace
 {
     void clap (Buf& b, double t0, float gain, float pan, std::vector<juce::MidiMessage>* midi = nullptr)
     {
+        capNote (iDrums, 39, t0, 0.05, gain, 0.05f);
+        InstScope scope (iDrums);
         if (midi) { midi->push_back (juce::MidiMessage::noteOn (10, 39, (juce::uint8) 90).withTimeStamp (t0)); midi->push_back (juce::MidiMessage::noteOff (10, 39).withTimeStamp (t0 + 0.05)); }
         for (int burst = 0; burst < 3; ++burst)   // a hand clap: three quick noise bursts through a band-pass
         {
@@ -819,7 +885,10 @@ static int renderTunes (const juce::File& dir)
         std::array<Buf, numTracks> tr;
         for (auto& b : tr) { b.setSize (2, loopLen * 3 + block); b.clear(); }
         TuneMidi md;
+        std::array<Buf, numInst> stems;
+        if (gStemsDir) for (int q = 0; q < numInst; ++q) { stems[(size_t) q].setSize (2, loopLen * 3 + block); stems[(size_t) q].clear(); gOut[q] = &stems[(size_t) q]; }
         for (int p = 0; p < 3; ++p) playTune (tr, T, tavern, p * loopSec, p == 1 ? &md : nullptr);
+        if (gStemsDir) writeStemSet (gStemsDir->getChildFile (tavern ? "tavern" : "harbour"), tavern ? "tavern" : "harbour", loopLen, xf);
         {   // MIDI (one file per part + one multitrack file with General MIDI sounds) and a dry stem per part
             const juce::String base (T.name);
             auto shift = [loopSec] (std::vector<juce::MidiMessage> v) { for (auto& m : v) m.setTimeStamp (m.getTimeStamp() - loopSec); return v; };
@@ -898,9 +967,11 @@ static int renderSamples (const juce::File& dir)
     rnd.setSeed (909);
     for (int n = 48; n <= 84; ++n) one ("pluck", n, 4.0, [&] (Buf& b) { pluck (b, (float) n, 0.0, 4.0, 0.18f, 0.5f, 0.996f); });          // melodies
     for (int n = 48; n <= 84; ++n) one ("pluck_stab", n, 1.5, [&] (Buf& b) { pluck (b, (float) n, 0.0, 1.5, 0.07f, 0.5f, 0.99f); });       // tavern off-beat chords
-    for (int n = 28; n <= 55; ++n) one ("bass", n, 4.0, [&] (Buf& b) { bass (b, (float) n, 0.0, 4.0, 0.3f); });
+    for (int n = 28; n <= 55; ++n) one ("bass", n, 6.5, [&] (Buf& b) { bass (b, (float) n, 0.0, 6.5, 0.3f); });   // long enough for the held notes
     for (int n = 41; n <= 84; ++n) one ("squeezebox", n, 6.0, [&] (Buf& b) { squeeze (b, (float) n, 0.0, 6.0, 0.03f, 0.5f); });
     for (int n = 36; n <= 84; ++n) one ("bell", n, 6.0, [&] (Buf& b) { bell (b, (float) n, 0.0, 0.05f, 0.5f); });
+    for (int n = 36; n <= 84; ++n) one ("bell_bent", n, 9.0, [&] (Buf& b) { bell (b, (float) n, 0.0, 0.05f, 0.5f, 0.0f, 6.0f); });   // stage 3 (bent with pitch bend)
+    for (int n = 36; n <= 72; ++n) one ("bell_low", n, 13.5, [&] (Buf& b) { bell (b, (float) n, 0.0, 0.06f, 0.5f, 0.0f, 9.0f); });  // stage 5
     for (int n = 24; n <= 52; ++n) one ("subdrone", n, 8.0, [&] (Buf& b)   // the stage 4-5 drone, held (the game fades it in over its length)
     {
         const float f = hz ((float) n);
@@ -915,6 +986,81 @@ static int renderSamples (const juce::File& dir)
     for (int k = 0; k < 4; ++k) one ("drums", 700 + k, 0.1, [&] (Buf& b) { shaker (b, 0.0, 0.08f); });   // shaker, 4 takes (key 70)
     for (int k = 0; k < 3; ++k) one ("drums", 390 + k, 0.15, [&] (Buf& b) { clap (b, 0.0, 0.05f, 0.5f); }); // clap, 3 takes (key 39)
     std::puts ("samples written");
+    return 0;
+}
+
+// ------------------------------------------------------------------ MIDI by instrument for every piece (stage loops as in the game, tunes)
+static void writeInstMidi (const juce::File& dir, const juce::String& piece, const InstMidi& m, double lengthSec, const juce::String& title)
+{
+    dir.createDirectory();
+    const int gm[numInst] = { 24, 24, 21, 32, 14, 38, -1, 14, 14 };   // General MIDI fall-backs for the multitrack file
+    juce::MidiFile all; all.setTicksPerQuarterNote (960);
+    juce::MidiMessageSequence meta;
+    meta.addEvent (juce::MidiMessage::tempoMetaEvent ((int) std::lround (60000000.0 / bpm)));
+    meta.addEvent (juce::MidiMessage::timeSignatureMetaEvent (4, 4));
+    meta.addEvent (juce::MidiMessage::textMetaEvent (3, title));
+    meta.addEvent (juce::MidiMessage::endOfTrack().withTimeStamp (lengthSec / beat * 960.0));
+    all.addTrack (meta);
+    for (int k = 0; k < numInst; ++k)
+    {
+        if (m.ev[k].empty()) continue;
+        auto toSeq = [&] (bool withMeta)
+        {
+            juce::MidiMessageSequence seq;
+            seq.addEvent (juce::MidiMessage::textMetaEvent (3, juce::String (instName[k])));
+            if (withMeta) { seq.addEvent (juce::MidiMessage::tempoMetaEvent ((int) std::lround (60000000.0 / bpm))); seq.addEvent (juce::MidiMessage::timeSignatureMetaEvent (4, 4)); }
+            if (gm[k] >= 0) seq.addEvent (juce::MidiMessage::programChange (1, gm[k]));
+            for (auto e : m.ev[k]) { e.setTimeStamp (juce::jmax (0.0, e.getTimeStamp()) / beat * 960.0); seq.addEvent (e); }
+            seq.updateMatchedPairs();
+            return seq;
+        };
+        juce::MidiFile one; one.setTicksPerQuarterNote (960); one.addTrack (toSeq (true));
+        const auto f = dir.getChildFile (piece + "_" + instName[k] + ".mid");
+        f.deleteFile(); { juce::FileOutputStream os (f); one.writeTo (os); }
+        all.addTrack (toSeq (false));
+    }
+    const auto f = dir.getChildFile (piece + "_all_instruments.mid");
+    f.deleteFile(); juce::FileOutputStream os (f); all.writeTo (os);
+}
+
+static int renderStems (const Buf& clip, const juce::File& dir);
+static int renderTunes (const juce::File& dir);
+static int renderMidiAll (const juce::File& dir)
+{
+    {   // WAV by instrument: the game's own render passes (same order and random takes as music_1..5 and the tunes)
+        const juce::File stemDir = dir.getChildFile ("_wav"), scratch = dir.getChildFile ("_scratch");
+        gStemsDir = &stemDir;
+        Buf silence (2, (int) (L * sr)); silence.clear();
+        rnd.setSeed (2024); bassLowpass = true;
+        renderStems (silence, scratch);
+        renderTunes (scratch);
+        gStemsDir = nullptr;
+        scratch.deleteRecursively();
+    }
+    // the five stage loops exactly as the game has them now (the first clip's chords, no vary): one 4-bar loop
+    for (int s = 0; s < numStages; ++s)
+    {
+        std::array<Buf, numTracks> tr;
+        for (auto& b : tr) { b.setSize (2, (int) (L * sr) + 1024); b.clear(); }
+        Buf silence (2, 16); silence.clear();
+        InstMidi m; gCap = &m; gCapFrom = 0.0;
+        arrange (tr, silence, s, 0.0, nullptr, 0);
+        gCap = nullptr;
+        const juce::String piece = "stage" + juce::String (s + 1);
+        writeInstMidi (dir.getChildFile (piece), piece, m, L, juce::String ("HOIST ") + piece + " - " + stageSet[s].name + " (F minor, 99 BPM, 4 bars)");
+    }
+    for (int k = 0; k < 2; ++k)
+    {
+        const Tune& T = k ? tavernTune : harbourTune;
+        std::array<Buf, numTracks> tr;
+        for (auto& b : tr) { b.setSize (2, (int) (16 * bar * sr) + (int) (8 * sr)); b.clear(); }
+        InstMidi m; gCap = &m; gCapFrom = 0.0;
+        playTune (tr, T, k == 1, 0.0);
+        gCap = nullptr;
+        const juce::String piece = k ? "tavern" : "harbour";
+        writeInstMidi (dir.getChildFile (piece), piece, m, 16 * bar, "HOIST " + piece + " tune (F minor, 99 BPM, 16 bars)");
+    }
+    std::puts ("MIDI by instrument written");
     return 0;
 }
 
@@ -988,6 +1134,7 @@ int main (int argc, char** argv)
     if (juce::String (argv[3]) == "gameamb") return renderGameAmb (juce::File (argv[2]));
     if (juce::String (argv[3]) == "tunes") return renderTunes (juce::File (argv[2]));
     if (juce::String (argv[3]) == "samples") return renderSamples (juce::File (argv[2]));
+    if (juce::String (argv[3]) == "midiall") return renderMidiAll (juce::File (argv[2]));
     juce::String chordArg;
     for (int a = 4; a < argc; ++a)
     {

@@ -13,6 +13,8 @@ INST = {
   'bass':       dict(rel=0.05, loop=None, desc='upright bass (pluck + sine body)'),
   'squeezebox': dict(rel=0.05, loop=(1.0, 1.0 + 20 / 5.2), desc='squeezebox / accordion (two detuned pulse waves, 5.2 Hz vibrato), sustain loop'),
   'bell':       dict(rel=6.0, loop=None, desc="ship's / harbour bell (rings out; note-off does not cut it)"),
+  'bell_bent':  dict(rel=9.0, loop=None, desc='the longer bell of stage 3 (bent down with pitch bend in the MIDI)'),
+  'bell_low':   dict(rel=13.5, loop=None, desc='the low, long bell of stage 5 (bent down with pitch bend)'),
   'subdrone':   dict(rel=0.5, loop=(1.0, 6.0), desc='stage 4-5 sub drone (sine + octave, 0.4 Hz wobble), sustain loop'),
 }
 def read(p):
