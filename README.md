@@ -93,6 +93,26 @@ few seconds clearly differ from the last ~12 s). The screen shows `CALM`, `BUILD
 - Each engine has its own built-in space (reverb); there is a hidden *Wet Gain* parameter for
   automation.
 
+## HOIST: tide and dread (third plugin)
+
+A small effect to put straight after any synth (Serum, 3xOsc), a piano or a pad. Two big ideas,
+three knobs and one button:
+
+| Control | What it does |
+|---|---|
+| **TIDE** | Movement, synced to your bar (4/4, 6/8, ...). **0-40% SWAY**: the sound rocks like a boat (slow pitch sway and stereo rocking). **30-80% SWELL**: a sidechain-style pump on every beat (the dotted beat in 6/8). **60-100% STORM**: a resonant filter wobble in tempo, from 1/4 up to 1/16, with grit. |
+| **DREAD** | A story in five stages (lamps 1-5): **1 FAIR WINDS** bright octave shimmer and space, **2 GREY SKIES** tape wow & flutter, warm and darker, **3 SOMETHING'S WRONG** the pitch drifts flat and bends, a seasick double, **4 THE DEEP** sub octave growl and reversed ghost tails, **5 ABYSS** the sound dissolves into dark wind. |
+| **MIX** | Dry / wet (the wet side is level-matched to your input). |
+| **ANCHOR** | Holds the current sound forever as a drone while you play on top. Click the button or the screen. |
+
+The screen is a little boat at sea: the waves follow TIDE (lightning in a storm), the sky goes
+from a synthwave sunset to grey skies, fog, a moonlit night and the abyss as DREAD rises.
+Right-click for the UI size; double-click a knob to reset it. Hidden *Wet Gain* parameter for
+automation.
+
+Made with games in mind: automate DREAD from 0 to 100% over one loop and a cheerful track walks
+through five "dread stages" with the same tempo, key and meter.
+
 ## Two plugins
 
 | | **ChaosGrain** (instrument) | **ChaosGrain FX** (effect) |

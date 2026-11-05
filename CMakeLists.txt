@@ -79,6 +79,41 @@ foreach(target ChaosGrain ChaosGrainFX)
             juce::juce_recommended_warning_flags)
 endforeach()
 
+# HOIST - a small "weather and story" effect: TIDE (sway / pump / storm wobble) and DREAD
+# (five stages from bright shimmer to the abyss), ANCHOR to hold the sound.
+juce_add_plugin(Hoist
+    COMPANY_NAME "ChaosGrain"
+    PRODUCT_NAME "Hoist"
+    IS_SYNTH FALSE
+    NEEDS_MIDI_INPUT FALSE
+    NEEDS_MIDI_OUTPUT FALSE
+    IS_MIDI_EFFECT FALSE
+    EDITOR_WANTS_KEYBOARD_FOCUS FALSE
+    COPY_PLUGIN_AFTER_BUILD FALSE
+    PLUGIN_MANUFACTURER_CODE Chgr
+    PLUGIN_CODE Hst1
+    FORMATS VST3 AU
+    VST3_CATEGORIES Fx Modulation Reverb
+    AU_MAIN_TYPE kAudioUnitType_Effect)
+
+target_sources(Hoist PRIVATE
+    Source/Hoist/HoistDSP.cpp
+    Source/Hoist/HoistProcessor.cpp
+    Source/Hoist/HoistEditor.cpp)
+target_compile_definitions(Hoist PUBLIC
+    JUCE_WEB_BROWSER=0
+    JUCE_USE_CURL=0
+    JUCE_VST3_CAN_REPLACE_VST2=0
+    JUCE_DISPLAY_SPLASH_SCREEN=0)
+target_link_libraries(Hoist
+    PRIVATE
+        juce::juce_audio_utils
+        juce::juce_dsp
+    PUBLIC
+        juce::juce_recommended_config_flags
+        juce::juce_recommended_lto_flags
+        juce::juce_recommended_warning_flags)
+
 option(CHAOSGRAIN_TESTS "Build the offline render test" OFF)
 if(CHAOSGRAIN_TESTS)
     juce_add_console_app(RenderTest)
@@ -108,4 +143,17 @@ if(CHAOSGRAIN_TESTS)
     target_include_directories(DemoFx PRIVATE $<TARGET_PROPERTY:ChaosGrainFX,INCLUDE_DIRECTORIES>)
     target_compile_definitions(DemoFx PRIVATE $<TARGET_PROPERTY:ChaosGrainFX,COMPILE_DEFINITIONS>)
     target_link_libraries(DemoFx PRIVATE ChaosGrainFX)
+
+    # Offline checks + demo recorder for HOIST
+    juce_add_console_app(HoistTest)
+    target_sources(HoistTest PRIVATE Tests/HoistTest.cpp)
+    target_include_directories(HoistTest PRIVATE $<TARGET_PROPERTY:Hoist,INCLUDE_DIRECTORIES>)
+    target_compile_definitions(HoistTest PRIVATE $<TARGET_PROPERTY:Hoist,COMPILE_DEFINITIONS>)
+    target_link_libraries(HoistTest PRIVATE Hoist)
+
+    juce_add_console_app(HoistDemo)
+    target_sources(HoistDemo PRIVATE Tests/HoistDemo.cpp)
+    target_include_directories(HoistDemo PRIVATE $<TARGET_PROPERTY:Hoist,INCLUDE_DIRECTORIES>)
+    target_compile_definitions(HoistDemo PRIVATE $<TARGET_PROPERTY:Hoist,COMPILE_DEFINITIONS>)
+    target_link_libraries(HoistDemo PRIVATE Hoist)
 endif()
