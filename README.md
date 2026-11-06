@@ -128,7 +128,7 @@ build/HoistLayers_artefacts/Release/HoistLayers game_audio/tavern <outdir> taver
 |---|---|---|
 | Bass, shaperbox, Pluck, drums, Bell, Guitar_arp | `s1_*` | the stage-1 band, one instrument per quest in the game |
 | Guitar_arp_2 (`Guitar_arp_2_x4.wav`) | `s1_guitar2` | a second arp take, 4 bars played four times; the game swaps the two, never together |
-| Raiders (`Raiders_F.wav`) | `s1_raiders` | battle layer; the original was in E minor, shifted up a semitone to F minor, 8 bars twice |
+| Raiders (`Raiders_x4.wav`) | `s1_raiders` | battle layer, F minor, 4 bars played four times |
 | tavern/Bass, shaperbox, pluck_stab, drums | `tav_*` | the harbour tavern, muffled in the game |
 
 Encode with `ffmpeg -i x.wav -c:a libvorbis -q:a 2 x.ogg` into Pocket Pirates' `public/audio/`.
