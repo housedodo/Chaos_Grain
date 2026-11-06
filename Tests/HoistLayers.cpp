@@ -4,10 +4,14 @@
 //   a seamless loop of exactly the same length so all six stay locked together in the game.
 //   Panning, the slow volume movement and the muffled low-pass are done live in the game (src/audio.js), so they
 //   never repeat the same way twice.
-//   The tavern set (game_audio/tavern/*.wav, same tempo and length) goes through HOIST more gently: a calm room in
-//   harbour, not a ship at sea. The game muffles it (heard through the tavern wall).
+//   The other sets (same tempo and length) each have their own folder and HOIST mood:
+//     stage1  game_audio/*.wav          -> s1_*   FAIR WEATHER (the band, the second arp, the Raiders battle layer)
+//     night   game_audio/night/*.wav    -> n1_*   calm, more space (dusk to daybreak)
+//     stage2  game_audio/stage2/*.wav   -> s2_*   GREY SKIES (more swell, tape wow)
+//     stage4  game_audio/stage4/*.wav   -> s4_*   THE DEEP (sub octave, ghost tails, whispers: the hut's theme)
+//     tavern  game_audio/tavern/*.wav   -> tav_*  gentle; the game muffles it (heard through the tavern wall)
 // Usage:
-//   HoistLayers <stemdir> <outdir> [stage1|stage2|stage4|tavern|night]   -> <outdir>/s1_<name>.wav or tav_<name>.wav (24-bit, 44.1 kHz, stereo)
+//   HoistLayers <stemdir> <outdir> [stage1|stage2|stage4|tavern|night]   -> <outdir>/<cue>.wav (24-bit, 44.1 kHz, stereo)
 #include <juce_audio_processors/juce_audio_processors.h>
 #include <juce_audio_formats/juce_audio_formats.h>
 #include "../Source/Hoist/HoistProcessor.h"
