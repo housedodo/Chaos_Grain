@@ -27,6 +27,7 @@ namespace
         { "shaperbox.wav",  "s1_shaperbox", 0.26f, 0.08f, 0.50f },
         { "Pluck.wav",      "s1_pluck",     0.22f, 0.08f, 0.50f },
         { "Guitar_arp.wav", "s1_guitar",    0.20f, 0.08f, 0.45f },
+        { "Guitar_arp_2_x4.wav", "s1_guitar2", 0.20f, 0.08f, 0.45f },   // the second arp (4 bars, played four times); the game swaps the two, never together
         { "Bell.wav",       "s1_bell",      0.32f, 0.10f, 0.62f },   // the most space: a bell far off over the water
         { "drums.wav",      "s1_drums",     0.12f, 0.05f, 0.30f },   // keep the hits
         { "Raiders_F.wav",  "s1_raiders",   0.14f, 0.10f, 0.38f },   // the battle layer (Raiders.wav up a semitone to F minor, 8 bars twice)
