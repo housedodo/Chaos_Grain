@@ -163,4 +163,11 @@ if(CHAOSGRAIN_TESTS)
     target_include_directories(HoistSoundtrack PRIVATE $<TARGET_PROPERTY:Hoist,INCLUDE_DIRECTORIES>)
     target_compile_definitions(HoistSoundtrack PRIVATE $<TARGET_PROPERTY:Hoist,COMPILE_DEFINITIONS>)
     target_link_libraries(HoistSoundtrack PRIVATE Hoist)
+
+    # The game's stage-1 open-sea stems (game_audio/) through HOIST, as seamless loops
+    juce_add_console_app(HoistLayers)
+    target_sources(HoistLayers PRIVATE Tests/HoistLayers.cpp)
+    target_include_directories(HoistLayers PRIVATE $<TARGET_PROPERTY:Hoist,INCLUDE_DIRECTORIES>)
+    target_compile_definitions(HoistLayers PRIVATE $<TARGET_PROPERTY:Hoist,COMPILE_DEFINITIONS>)
+    target_link_libraries(HoistLayers PRIVATE Hoist)
 endif()
