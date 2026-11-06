@@ -131,6 +131,7 @@ build/HoistLayers_artefacts/Release/HoistLayers game_audio/tavern <outdir> taver
 | Raiders (`Raiders_x4.wav`) | `s1_raiders` | battle layer, F minor, 4 bars played four times |
 | tavern/Bass, shaperbox, pluck_stab, drums | `tav_*` | the harbour tavern, muffled in the game |
 | stage2/Bass, drums, Guitar_arp, Pluck | `s2_*` | dread stage 2 on open sea (`HoistLayers game_audio/stage2 <outdir> stage2`) |
+| stage4/Pluck, Subdrone, drums | `s4_*` | the hut's theme, first visit (`HoistLayers game_audio/stage4 <outdir> stage4`) |
 | night/Pluck, shaperbox, String_night, Bell | `n1_*` | the calm night version, dusk to daybreak (`HoistLayers game_audio/night <outdir> night`) |
 
 Encode with `ffmpeg -i x.wav -c:a libvorbis -q:a 2 x.ogg` into Pocket Pirates' `public/audio/`.
