@@ -114,6 +114,25 @@ to reset it. Hidden *Wet Gain* parameter for automation.
 For the game: render one loop per dread stage (same tempo, key and meter) with DREAD at about
 10, 30, 50, 70 and 95 % so the game's crossfades line up.
 
+### Game stems through HOIST (`Tests/HoistLayers.cpp`)
+The game's music stems live in `game_audio/` (WAV masters, F minor, 99 BPM, 16 bars = 38.79 s). `HoistLayers` runs each one
+through HOIST at FAIR WEATHER with its own TIDE / MIX and writes seamless loops of exactly the same length:
+
+```
+cmake -B build -DCHAOSGRAIN_TESTS=ON && cmake --build build --target HoistLayers
+build/HoistLayers_artefacts/Release/HoistLayers game_audio <outdir>                 # stage 1: s1_*.wav
+build/HoistLayers_artefacts/Release/HoistLayers game_audio/tavern <outdir> tavern   # the tavern: tav_*.wav
+```
+
+| Stem | Game cue | Notes |
+|---|---|---|
+| Bass, shaperbox, Pluck, drums, Bell, Guitar_arp | `s1_*` | the stage-1 band, one instrument per quest in the game |
+| Guitar_arp_2 (`Guitar_arp_2_x4.wav`) | `s1_guitar2` | a second arp take, 4 bars played four times; the game swaps the two, never together |
+| Raiders (`Raiders_F.wav`) | `s1_raiders` | battle layer; the original was in E minor, shifted up a semitone to F minor, 8 bars twice |
+| tavern/Bass, shaperbox, pluck_stab, drums | `tav_*` | the harbour tavern, muffled in the game |
+
+Encode with `ffmpeg -i x.wav -c:a libvorbis -q:a 2 x.ogg` into Pocket Pirates' `public/audio/`.
+
 ## Two plugins
 
 | | **ChaosGrain** (instrument) | **ChaosGrain FX** (effect) |
