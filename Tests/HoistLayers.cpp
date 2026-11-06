@@ -4,8 +4,10 @@
 //   a seamless loop of exactly the same length so all six stay locked together in the game.
 //   Panning, the slow volume movement and the muffled low-pass are done live in the game (src/audio.js), so they
 //   never repeat the same way twice.
+//   The tavern set (game_audio/tavern/*.wav, same tempo and length) goes through HOIST more gently: a calm room in
+//   harbour, not a ship at sea. The game muffles it (heard through the tavern wall).
 // Usage:
-//   HoistLayers <stemdir> <outdir>   -> <outdir>/s1_<name>.wav (24-bit, 44.1 kHz, stereo)
+//   HoistLayers <stemdir> <outdir> [stage1|tavern]   -> <outdir>/s1_<name>.wav or tav_<name>.wav (24-bit, 44.1 kHz, stereo)
 #include <juce_audio_processors/juce_audio_processors.h>
 #include <juce_audio_formats/juce_audio_formats.h>
 #include "../Source/Hoist/HoistProcessor.h"
@@ -20,13 +22,19 @@ namespace
 
     // stem file -> game cue, and its HOIST settings (stage 1: FAIR WEATHER)
     struct Layer { const char* file; const char* cue; float tide, dread, mix; };
-    const Layer layers[] = {
+    const Layer stage1[] = {
         { "Bass.wav",       "s1_bass",      0.10f, 0.06f, 0.30f },   // little pitch sway: a swaying bass sounds out of tune
         { "shaperbox.wav",  "s1_shaperbox", 0.26f, 0.08f, 0.50f },
         { "Pluck.wav",      "s1_pluck",     0.22f, 0.08f, 0.50f },
         { "Guitar_arp.wav", "s1_guitar",    0.20f, 0.08f, 0.45f },
         { "Bell.wav",       "s1_bell",      0.32f, 0.10f, 0.62f },   // the most space: a bell far off over the water
         { "drums.wav",      "s1_drums",     0.12f, 0.05f, 0.30f },   // keep the hits
+    };
+    const Layer tavern[] = {
+        { "Bass.wav",       "tav_bass",      0.06f, 0.04f, 0.25f },
+        { "shaperbox.wav",  "tav_shaperbox", 0.14f, 0.05f, 0.40f },
+        { "pluck_stab.wav", "tav_pluck",     0.12f, 0.05f, 0.40f },
+        { "drums.wav",      "tav_drums",     0.06f, 0.03f, 0.25f },
     };
 
     struct Head : juce::AudioPlayHead
@@ -68,13 +76,17 @@ namespace
 int main (int argc, char** argv)
 {
     juce::ScopedJuceInitialiser_GUI init;
-    if (argc < 3) { std::puts ("usage: HoistLayers <stemdir> <outdir>"); return 2; }
+    if (argc < 3) { std::puts ("usage: HoistLayers <stemdir> <outdir> [stage1|tavern]"); return 2; }
+    const bool tav = argc > 3 && juce::String (argv[3]) == "tavern";
+    const Layer* first = tav ? std::begin (tavern) : std::begin (stage1);
+    const Layer* last = tav ? std::end (tavern) : std::end (stage1);
     const juce::File inDir (argv[1]), outDir (argv[2]);
     outDir.createDirectory();
     const int block = 512;
 
-    for (const auto& L : layers)
+    for (const Layer* it = first; it != last; ++it)
     {
+        const Layer& L = *it;
         Buf stem; double rate = 44100.0;
         if (! load (inDir.getChildFile (L.file), stem, rate)) { std::printf ("missing %s\n", L.file); return 1; }
         const int len = stem.getNumSamples();
