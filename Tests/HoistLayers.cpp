@@ -29,6 +29,7 @@ namespace
         { "Guitar_arp.wav", "s1_guitar",    0.20f, 0.08f, 0.45f },
         { "Bell.wav",       "s1_bell",      0.32f, 0.10f, 0.62f },   // the most space: a bell far off over the water
         { "drums.wav",      "s1_drums",     0.12f, 0.05f, 0.30f },   // keep the hits
+        { "Raiders_F.wav",  "s1_raiders",   0.14f, 0.10f, 0.38f },   // the battle layer (Raiders.wav up a semitone to F minor, 8 bars twice)
     };
     const Layer tavern[] = {
         { "Bass.wav",       "tav_bass",      0.06f, 0.04f, 0.25f },
