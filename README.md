@@ -130,6 +130,7 @@ build/HoistLayers_artefacts/Release/HoistLayers game_audio/tavern <outdir> taver
 | Guitar_arp_2 (`Guitar_arp_2_x4.wav`) | `s1_guitar2` | a second arp take, 4 bars played four times; the game swaps the two, never together |
 | Raiders (`Raiders_x4.wav`) | `s1_raiders` | battle layer, F minor, 4 bars played four times |
 | tavern/Bass, shaperbox, pluck_stab, drums | `tav_*` | the harbour tavern, muffled in the game |
+| night/Pluck, shaperbox, String_night, Bell | `n1_*` | the calm night version, dusk to daybreak (`HoistLayers game_audio/night <outdir> night`) |
 
 Encode with `ffmpeg -i x.wav -c:a libvorbis -q:a 2 x.ogg` into Pocket Pirates' `public/audio/`.
 

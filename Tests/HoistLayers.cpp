@@ -7,7 +7,7 @@
 //   The tavern set (game_audio/tavern/*.wav, same tempo and length) goes through HOIST more gently: a calm room in
 //   harbour, not a ship at sea. The game muffles it (heard through the tavern wall).
 // Usage:
-//   HoistLayers <stemdir> <outdir> [stage1|tavern]   -> <outdir>/s1_<name>.wav or tav_<name>.wav (24-bit, 44.1 kHz, stereo)
+//   HoistLayers <stemdir> <outdir> [stage1|tavern|night]   -> <outdir>/s1_<name>.wav or tav_<name>.wav (24-bit, 44.1 kHz, stereo)
 #include <juce_audio_processors/juce_audio_processors.h>
 #include <juce_audio_formats/juce_audio_formats.h>
 #include "../Source/Hoist/HoistProcessor.h"
@@ -31,6 +31,12 @@ namespace
         { "Bell.wav",       "s1_bell",      0.32f, 0.10f, 0.62f },   // the most space: a bell far off over the water
         { "drums.wav",      "s1_drums",     0.12f, 0.05f, 0.30f },   // keep the hits
         { "Raiders_x4.wav", "s1_raiders",   0.14f, 0.10f, 0.38f },   // the battle layer (Raiders.wav, F minor, 4 bars played four times)
+    };
+    const Layer night[] = {   // the calm night version of the song: more space, gentle sway
+        { "Pluck.wav",        "n1_pluck",     0.16f, 0.05f, 0.55f },
+        { "shaperbox.wav",    "n1_shaperbox", 0.20f, 0.05f, 0.55f },
+        { "String_night.wav", "n1_strings",   0.22f, 0.06f, 0.60f },
+        { "Bell.wav",         "n1_bell",      0.28f, 0.06f, 0.65f },
     };
     const Layer tavern[] = {
         { "Bass.wav",       "tav_bass",      0.06f, 0.04f, 0.25f },
@@ -78,10 +84,11 @@ namespace
 int main (int argc, char** argv)
 {
     juce::ScopedJuceInitialiser_GUI init;
-    if (argc < 3) { std::puts ("usage: HoistLayers <stemdir> <outdir> [stage1|tavern]"); return 2; }
-    const bool tav = argc > 3 && juce::String (argv[3]) == "tavern";
-    const Layer* first = tav ? std::begin (tavern) : std::begin (stage1);
-    const Layer* last = tav ? std::end (tavern) : std::end (stage1);
+    if (argc < 3) { std::puts ("usage: HoistLayers <stemdir> <outdir> [stage1|tavern|night]"); return 2; }
+    const juce::String set = argc > 3 ? juce::String (argv[3]) : "stage1";
+    const bool tav = set == "tavern", nig = set == "night";
+    const Layer* first = tav ? std::begin (tavern) : nig ? std::begin (night) : std::begin (stage1);
+    const Layer* last = tav ? std::end (tavern) : nig ? std::end (night) : std::end (stage1);
     const juce::File inDir (argv[1]), outDir (argv[2]);
     outDir.createDirectory();
     const int block = 512;
