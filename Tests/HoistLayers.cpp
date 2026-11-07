@@ -30,6 +30,7 @@ namespace
         { "Bass.wav",       "s1_bass",      0.10f, 0.06f, 0.30f },   // little pitch sway: a swaying bass sounds out of tune
         { "shaperbox.wav",  "s1_shaperbox", 0.26f, 0.08f, 0.50f },
         { "Pluck.wav",      "s1_pluck",     0.22f, 0.08f, 0.50f },
+        { "Pluck_variation.wav", "s1_pluck2", 0.22f, 0.08f, 0.50f },   // the composer's own variation of the pluck melody; the game swaps the two, never together
         { "Guitar_arp.wav", "s1_guitar",    0.20f, 0.08f, 0.45f },
         { "Guitar_arp_2_x4.wav", "s1_guitar2", 0.20f, 0.08f, 0.45f },   // the second arp (4 bars, played four times); the game swaps the two, never together
         { "Bell.wav",       "s1_bell",      0.32f, 0.10f, 0.62f },   // the most space: a bell far off over the water
@@ -42,6 +43,7 @@ namespace
         { "shaperbox.wav",    "n1_shaperbox", 0.20f, 0.05f, 0.55f },
         { "String_night.wav", "n1_strings",   0.22f, 0.06f, 0.60f },
         { "Bell.wav",         "n1_bell",      0.28f, 0.06f, 0.65f },
+        { "Night_pad.wav",    "n1_pad",       0.26f, 0.05f, 0.62f },   // the big night pad: calm seas, long and peaceful; the game swaps it with the night band
     };
     const Layer stage2[] = {   // dread stage 2, GREY SKIES: more swell, a little tape wow
         { "Bass.wav",       "s2_bass",   0.20f, 0.25f, 0.35f },
