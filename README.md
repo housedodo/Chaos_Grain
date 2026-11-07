@@ -130,6 +130,7 @@ build/HoistLayers_artefacts/Release/HoistLayers game_audio/tavern <outdir> taver
 | Guitar_arp_2 (`Guitar_arp_2_x4.wav`) | `s1_guitar2` | a second arp take, 4 bars played four times; the game swaps the two, never together |
 | Raiders (`Raiders_x4.wav`) | `s1_raiders` | battle layer, F minor, 4 bars played four times |
 | Pluck variation (`Pluck_variation.wav`, +6.3 dB) | `s1_pluck2` | the composer's variation of the pluck melody; the game swaps the two, never together |
+| Pluck off the beat (`Pluck_off_the_beat.wav`, +4.5 dB) | `s1_pluck3` | a third take of the pluck melody; the game rotates the three at random |
 | Night pad (`night/Night_pad.wav`) | `n1_pad` | the big night pad: TIDE 0.26, DREAD 0.05, MIX 0.62; the game switches it with the night band (calm seas favour the pad) |
 | Counter melody (`Counter_melody.wav`) | `s1_counter` | the counter melody: TIDE 0.24, DREAD 0.08, MIX 0.52; the game fades it in and out rarely, over the band |
 
