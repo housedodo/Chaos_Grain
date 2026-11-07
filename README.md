@@ -130,94 +130,12 @@ build/HoistLayers_artefacts/Release/HoistLayers game_audio/tavern <outdir> taver
 | Guitar_arp_2 (`Guitar_arp_2_x4.wav`) | `s1_guitar2` | a second arp take, 4 bars played four times; the game swaps the two, never together |
 | Raiders (`Raiders_x4.wav`) | `s1_raiders` | battle layer, F minor, 4 bars played four times |
 | Counter melody (`Counter_melody.wav`) | `s1_counter` | the counter melody: TIDE 0.24, DREAD 0.08, MIX 0.52; the game fades it in and out rarely, over the band |
-| tavern/Bass, shaperbox, pluck_stab, drums | `tav_*` | the harbour tavern, muffled in the game |
-| stage2/Bass, drums, Guitar_arp, Pluck | `s2_*` | dread stage 2 on open sea (`HoistLayers game_audio/stage2 <outdir> stage2`) |
-| stage4/Pluck, Subdrone, drums | `s4_*` | the hut's theme, first visit (`HoistLayers game_audio/stage4 <outdir> stage4`) |
-| night/Pluck, shaperbox, String_night, Bell | `n1_*` | the calm night version, dusk to daybreak (`HoistLayers game_audio/night <outdir> night`) |
 
-`game_audio/dread/` holds `music_3` ("Dread"): the original in B minor and the F minor version the game uses (Rubber Band, down six semitones; not through HoistLayers).
-
-Encode with `ffmpeg -i x.wav -c:a libvorbis -q:a 2 x.ogg` into Pocket Pirates' `public/audio/`.
-
-## Two plugins
-
-| | **ChaosGrain** (instrument) | **ChaosGrain FX** (effect) |
-|---|---|---|
-| Goes on | an instrument / MIDI track | any audio track (guitar, synth, vocals, bus) |
-| Sound source | a loaded sample | the live input |
-| Knobs | SIZE · CHAOS · PITCH + small knobs | SHAPE · CHAOS · MIX |
-| Buttons | HOLD · SYNC · RAND · LOCK | RESONATE · SPECTRAL · EVOLVE + FREEZE |
-
-- **Filter / Reso / Space** (instrument): resonant low-pass on the grains, and reverb.
-
-## Using it
-
-1. Put it on an instrument/MIDI track in your DAW.
-2. Drop an audio file on the screen (or click the screen).
-3. Play MIDI notes (C3 / note 60 = original pitch), or press the red **HOLD** button to drone without MIDI.
-4. Right-click for presets, or hit **RAND** until something cool happens.
-
-The bright blocks on the screen are the grains currently playing; the dotted line is the play position.
-
-### All parameters (presets, RAND and DAW automation)
-
-| Section | Knob | What it does |
-|---|---|---|
-| Grain | **Position** | Where in the sample grains start |
-| | **Scan** | Moves the position through the sample (1x = normal speed, negative = backwards, 0 = frozen) |
-| | **Spray** | Random offset around the position |
-| | **Size** | Grain length (5 ms – 2 s). Short = textures, long = chops/pads |
-| | **Density** | Grains per second |
-| | **Jitter** | Timing randomness (in sync mode: chance to skip a step) |
-| | **Shape** | 0 = hard-edged chop, 100 = smooth bell |
-| Pitch / Order | **Pitch** | Transpose |
-| | **Pitch Rnd** | Random pitch per grain (±semitones) |
-| | **Quantize** | Snap the random pitch to semitones, octaves or 5ths+octaves |
-| | **Reverse** | Chance a grain plays backwards |
-| | **Slices** | Cuts the sample into N equal chops; grains start on slice boundaries |
-| | **Jumble** | Chance a grain jumps to a random slice (shuffles the order) |
-| | **Repeat** | Chance a grain repeats the last one (stutter) |
-| Motion / Output | **Spread** | Random stereo panning |
-| | **Sync Rate** | Grid used when **Tempo Sync** is on (follows the DAW tempo) |
-| | **Attack / Release** | Note envelope |
-| | **CHAOS** | Macro that scales every random amount at once (0 = tidy, 200% = madness) |
-| | **Gain** | Output level |
-
-### Recipes
-
-- **Pads:** Size 400–1000 ms, Density 20–40, Shape 100%, Spray ~25%, slow Attack/Release. Play chords.
-- **Chops:** Tempo Sync on, Rate 1/16, Slices 8–16, Jumble 50–100%, Shape low, Size ≈ one step.
-- **Glitch:** Short Size (20–60 ms), high Pitch Chaos with Semitones quantize, Repeat + Reverse up.
-- **Freeze:** Scan 0, Spray low, long Size, Density high – the sound freezes at Position.
-
-## Getting a build
-
-### Easiest: GitHub Actions
-Every push builds the Windows VST3 plugins via `.github/workflows/build.yml`.
-Download it from the run's **Artifacts** section. macOS and Linux builds can be re-enabled by
-uncommenting them in the workflow's build matrix.
-
-### Build it yourself
-Requires CMake 3.22+ and a C++17 compiler (Visual Studio 2022 on Windows, Xcode on macOS).
-JUCE is downloaded automatically.
-
-```bash
-cmake -B build -DCMAKE_BUILD_TYPE=Release
-cmake --build build --config Release
-```
-
-The plugin ends up in `build/ChaosGrain_artefacts/Release/`.
-
-### Installing
-- **Windows:** close your DAW, then copy the `ChaosGrain.vst3` and `ChaosGrain FX.vst3` folders to
-  `C:\Program Files\Common Files\VST3\` and rescan plugins.
-- **macOS:** copy `ChaosGrain.vst3` to `~/Library/Audio/Plug-Ins/VST3/` and `ChaosGrain.component`
-  to `~/Library/Audio/Plug-Ins/Components/`. Unsigned builds downloaded from the internet may need
-  `xattr -cr ~/Library/Audio/Plug-Ins/VST3/ChaosGrain.vst3` before your DAW will load them.
-- **Linux:** copy `ChaosGrain.vst3` to `~/.vst3/`
-
-Then rescan plugins in your DAW.
-
-## Notes
-- The sample's file path is saved with your project, not the audio itself; if you move the file, reload it.
-- Samples are normalised on load and limited to 10 minutes.
+### Pluck variations (`game_audio/pluck_variations/`)
+The stage-1 pluck is one 4-bar phrase played four times. Three 16-bar variations that change from cycle to cycle, played with the
+real pluck (every note is a sample cut from `Pluck.wav`, shifted a few semitones at most; `make_pluck_variations.py`):
+1. **Call and answer**: the first two bars stay; the answer in bars 3-4 is new each cycle (as written, climbing to Ab5, sinking to Eb4, home on a long F).
+2. **Off the beat**: the same tune pushed in time: anticipations, a 3+3+2 lilt, running eighths, then half time.
+3. **Breathing**: fewer notes and more room; the third cycle turns up to Ab5; the last bar is empty so the loop breathes.
+`pluck_var_*.wav` are the dry takes, `s1_pluck_var_*.wav` the same through HOIST at the pluck's settings (game-ready), `.mid` the
+lines for re-recording with the original synth, `previews/` the band with each pluck (and the original) as mp3.
