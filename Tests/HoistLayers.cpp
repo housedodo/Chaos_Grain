@@ -5,7 +5,7 @@
 //   Panning, the slow volume movement and the muffled low-pass are done live in the game (src/audio.js), so they
 //   never repeat the same way twice.
 //   The other sets (same tempo and length) each have their own folder and HOIST mood:
-//     stage1  game_audio/*.wav          -> s1_*   FAIR WEATHER (the band, the second arp, the Raiders battle layer)
+//     stage1  game_audio/*.wav          -> s1_*   FAIR WEATHER (the band, the second arp, the Raiders battle layer, the counter melody)
 //     night   game_audio/night/*.wav    -> n1_*   calm, more space (dusk to daybreak)
 //     stage2  game_audio/stage2/*.wav   -> s2_*   GREY SKIES (more swell, tape wow)
 //     stage4  game_audio/stage4/*.wav   -> s4_*   THE DEEP (sub octave, ghost tails, whispers: the hut's theme)
@@ -35,6 +35,7 @@ namespace
         { "Bell.wav",       "s1_bell",      0.32f, 0.10f, 0.62f },   // the most space: a bell far off over the water
         { "drums.wav",      "s1_drums",     0.12f, 0.05f, 0.30f },   // keep the hits
         { "Raiders_x4.wav", "s1_raiders",   0.14f, 0.10f, 0.38f },   // the battle layer (Raiders.wav, F minor, 4 bars played four times)
+        { "Counter_melody.wav", "s1_counter", 0.24f, 0.08f, 0.52f },   // the counter melody: comes in rarely, fades in and out on its own
     };
     const Layer night[] = {   // the calm night version of the song: more space, gentle sway
         { "Pluck.wav",        "n1_pluck",     0.16f, 0.05f, 0.55f },

@@ -129,6 +129,7 @@ build/HoistLayers_artefacts/Release/HoistLayers game_audio/tavern <outdir> taver
 | Bass, shaperbox, Pluck, drums, Bell, Guitar_arp | `s1_*` | the stage-1 band, one instrument per quest in the game |
 | Guitar_arp_2 (`Guitar_arp_2_x4.wav`) | `s1_guitar2` | a second arp take, 4 bars played four times; the game swaps the two, never together |
 | Raiders (`Raiders_x4.wav`) | `s1_raiders` | battle layer, F minor, 4 bars played four times |
+| Counter melody (`Counter_melody.wav`) | `s1_counter` | the counter melody: TIDE 0.24, DREAD 0.08, MIX 0.52; the game fades it in and out rarely, over the band |
 | tavern/Bass, shaperbox, pluck_stab, drums | `tav_*` | the harbour tavern, muffled in the game |
 | stage2/Bass, drums, Guitar_arp, Pluck | `s2_*` | dread stage 2 on open sea (`HoistLayers game_audio/stage2 <outdir> stage2`) |
 | stage4/Pluck, Subdrone, drums | `s4_*` | the hut's theme, first visit (`HoistLayers game_audio/stage4 <outdir> stage4`) |
